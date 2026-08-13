@@ -1,0 +1,125 @@
+{
+  "name": "livedeck",
+  "displayName": "LiveDeck — Inline HTML Deck Editor",
+  "description": "Edit HTML slide decks in place, PowerPoint-style. Click into any text, type, format, add bullets — every change is written back to the HTML file as a minimal, surgical edit.",
+  "version": "0.1.0",
+  "publisher": "celltype",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shawnwahi/LiveDeck"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "slides",
+    "presentation",
+    "html",
+    "wysiwyg",
+    "deck",
+    "editor"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "livedeck.editor",
+        "displayName": "LiveDeck",
+        "selector": [
+          { "filenamePattern": "*.html" },
+          { "filenamePattern": "*.htm" }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "livedeck.open",
+        "title": "Open with LiveDeck",
+        "category": "LiveDeck",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "livedeck.openSource",
+        "title": "Reopen as HTML Source",
+        "category": "LiveDeck",
+        "icon": "$(code)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "livedeck.open",
+          "when": "resourceExtname =~ /\\.html?$/ && activeCustomEditorId != 'livedeck.editor'",
+          "group": "navigation"
+        },
+        {
+          "command": "livedeck.openSource",
+          "when": "activeCustomEditorId == 'livedeck.editor'",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "livedeck.open",
+          "when": "resourceExtname =~ /\\.html?$/",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "LiveDeck",
+      "properties": {
+        "livedeck.slideSelectors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [
+            "section.slide",
+            ".slide",
+            ".reveal .slides > section",
+            "body > section",
+            "main > section",
+            "[data-slide]"
+          ],
+          "description": "CSS selectors tried in order to detect slides for navigation. The first selector matching 2+ sizable elements wins."
+        },
+        "livedeck.editDebounceMs": {
+          "type": "number",
+          "default": 400,
+          "description": "How long to wait after typing stops before writing the edit back to the HTML file."
+        },
+        "livedeck.pastePlainText": {
+          "type": "boolean",
+          "default": true,
+          "description": "Paste as plain text so pasted content picks up the deck's theme. Use Cmd/Ctrl+Shift+V to paste with original formatting."
+        },
+        "livedeck.normalizeMarkup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Normalize editor output when writing back: <b>→<strong>, <i>→<em>, strip empty spans and font tags."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node esbuild.mjs --tests && node --test out-tests/",
+    "package": "npm run build && vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "1.85.0",
+    "@vscode/vsce": "^2.32.0",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "parse5": "^7.1.2"
+  }
+}

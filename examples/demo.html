@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LiveDeck Demo</title>
+<style>
+  :root {
+    --bg: #0e1420;
+    --card: #16202e;
+    --ink: #e8edf4;
+    --muted: #9fb0c3;
+    --accent: #4fd1a5;
+    --accent2: #6ea8fe;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  }
+  section.slide {
+    max-width: 1100px;
+    min-height: 620px;
+    margin: 28px auto;
+    padding: 56px 72px;
+    background: var(--card);
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,.07);
+    display: flex;
+    flex-direction: column;
+  }
+  h1 { font-size: 44px; margin: 0 0 10px; letter-spacing: -0.5px; }
+  h2 { font-size: 30px; margin: 0 0 24px; color: var(--accent); }
+  p.lede { font-size: 20px; color: var(--muted); max-width: 46em; }
+  ul { font-size: 19px; line-height: 1.75; }
+  li::marker { color: var(--accent); }
+  code {
+    background: rgba(110,168,254,.14);
+    color: var(--accent2);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .cols { display: flex; gap: 48px; align-items: flex-start; }
+  .cols > div { flex: 1; }
+  table { border-collapse: collapse; width: 100%; font-size: 17px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; }
+  th, td { padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.09); }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  .footer { margin-top: auto; color: var(--muted); font-size: 13px; }
+  .accent { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<section class="slide">
+  <h1>LiveDeck <span class="accent">demo deck</span></h1>
+  <p class="lede">Click into any text on this slide and edit it like PowerPoint. Every change is written straight back to <code>demo.html</code> — the only the element you touched.</p>
+  <ul>
+    <li>Select text and press <strong>⌘B</strong>, <em>⌘I</em>, or <u>⌘U</u></li>
+    <li>Press Enter in a bullet to add another one</li>
+    <li>Tab / Shift+Tab indent and outdent bullets</li>
+    <li>Alt+↑ / Alt+↓ reorder bullets</li>
+  </ul>
+  <p class="footer">Slide 1 · LiveDeck</p>
+</section>
+
+<section class="slide">
+  <h2>Graphics render exactly as in the browser</h2>
+  <div class="cols">
+    <div>
+      <p class="lede">The SVG below is part of the deck theme; the canvas next to it is drawn by an inline script at load time. Neither is editable — text is.</p>
+      <svg width="380" height="220" viewBox="0 0 380 220" role="img" aria-label="bar chart">
+        <line x1="40" y1="10" x2="40" y2="190" stroke="#3a4a5e" stroke-width="2"/>
+        <line x1="40" y1="190" x2="370" y2="190" stroke="#3a4a5e" stroke-width="2"/>
+        <rect x="70"  y="90"  width="52" height="100" fill="#4fd1a5" rx="4"/>
+        <rect x="150" y="55"  width="52" height="135" fill="#6ea8fe" rx="4"/>
+        <rect x="230" y="120" width="52" height="70"  fill="#4fd1a5" rx="4"/>
+        <rect x="310" y="30"  width="52" height="160" fill="#6ea8fe" rx="4"/>
+        <text x="96"  y="208" fill="#9fb0c3" font-size="12" text-anchor="middle">Q1</text>
+        <text x="176" y="208" fill="#9fb0c3" font-size="12" text-anchor="middle">Q2</text>
+        <text x="256" y="208" fill="#9fb0c3" font-size="12" text-anchor="middle">Q3</text>
+        <text x="336" y="208" fill="#9fb0c3" font-size="12" text-anchor="middle">Q4</text>
+      </svg>
+    </div>
+    <div>
+      <p class="lede">Script-drawn canvas:</p>
+      <canvas id="wave" width="420" height="240"></canvas>
+    </div>
+  </div>
+  <p class="footer">Slide 2 · LiveDeck</p>
+</section>
+
+<section class="slide">
+  <h2>Tables edit cell by cell</h2>
+  <p class="lede">Click any cell. LiveDeck rewrites just that cell in the file, so the rest of the table markup is untouched.</p>
+  <table>
+    <thead>
+      <tr><th>Metric</th><th>Baseline</th><th>LiveDeck workflow</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Fix a typo on one slide</td><td class="num">1–2 min of prompting</td><td class="num">5 seconds</td></tr>
+      <tr><td>Risk of collateral changes</td><td class="num">real</td><td class="num">zero — single-element writes</td></tr>
+      <tr><td>Diff size for a word change</td><td class="num">varies</td><td class="num">one line</td></tr>
+    </tbody>
+  </table>
+  <p class="footer">Slide 3 · LiveDeck</p>
+</section>
+
+<script>
+  (function () {
+    const c = document.getElementById('wave');
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#0e1420';
+    ctx.fillRect(0, 0, c.width, c.height);
+    for (let series = 0; series < 2; series++) {
+      ctx.beginPath();
+      ctx.strokeStyle = series ? '#6ea8fe' : '#4fd1a5';
+      ctx.lineWidth = 2.5;
+      for (let x = 0; x <= c.width; x += 4) {
+        const y = c.height / 2 +
+          Math.sin(x / 38 + series * 1.8) * 46 * Math.sin(x / 240 + series);
+        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  })();
+</script>
+</body>
+</html>

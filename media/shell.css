@@ -1,0 +1,184 @@
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: 12px;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128,128,128,.25));
+  background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background));
+  user-select: none;
+}
+
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.tb-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 5px;
+  background: var(--vscode-editorGroup-border, rgba(128,128,128,.3));
+}
+
+.tb-spacer { flex: 1; }
+
+#toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+#toolbar button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.18));
+}
+#toolbar button.active {
+  background: var(--vscode-toolbar-activeBackground, rgba(64,156,255,.25));
+  border-color: var(--vscode-focusBorder, rgba(64,156,255,.6));
+}
+#toolbar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+#toolbar svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+.glyph { font-size: 12.5px; line-height: 1; }
+.glyph.gb { font-weight: 700; }
+.glyph.gi { font-style: italic; font-family: Georgia, serif; }
+.glyph.gu { text-decoration: underline; }
+.glyph.gs { text-decoration: line-through; }
+.glyph.gm { font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; }
+.glyph sub { font-size: 8px; }
+
+#slide-ind, #zoom-ind {
+  min-width: 44px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+}
+button#zoom-ind { color: var(--vscode-descriptionForeground); }
+
+#crumb {
+  margin-left: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+#dirty-dot {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
+  margin-right: 2px;
+}
+
+#link-pop[hidden] { display: none; }
+
+#link-pop {
+  position: absolute;
+  top: 36px;
+  left: 8px;
+  z-index: 50;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--vscode-editorWidget-border, rgba(128,128,128,.35));
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  box-shadow: 0 4px 12px rgba(0,0,0,.35);
+}
+#link-pop input {
+  width: 260px;
+  padding: 3px 6px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  outline: none;
+  font-family: inherit;
+}
+#link-pop input:focus { border-color: var(--vscode-focusBorder); }
+#link-pop button {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 3px;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  cursor: pointer;
+}
+#link-pop button:hover { background: var(--vscode-button-hoverBackground); }
+#link-pop button#link-remove {
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+}
+
+#frame-holder {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+}
+
+#deck-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: white;
+  transform-origin: top left;
+}
+
+#splash {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--vscode-descriptionForeground);
+}
+
+#toast {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 60;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--vscode-notifications-background, #333);
+  color: var(--vscode-notifications-foreground, #eee);
+  border: 1px solid var(--vscode-notifications-border, rgba(128,128,128,.35));
+  box-shadow: 0 4px 12px rgba(0,0,0,.35);
+  font-size: 11.5px;
+}
