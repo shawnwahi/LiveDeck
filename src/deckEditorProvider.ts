@@ -7,6 +7,7 @@ import {
   regionOf,
   indentOf,
   deepestContaining,
+  deletionRange,
   DeckMap,
 } from './sourceMap';
 import { inlineResources, ResourceResolver, ResolvedResource } from './resources';
@@ -454,11 +455,19 @@ class DeckSession {
         newText = `${startTag}${msg.html}</${entry.tag}>`;
       }
     } else {
-      if (!Array.isArray(msg.parts) || msg.parts.length === 0) return;
-      rangeStart = entry.outerStart;
-      rangeEnd = entry.outerEnd;
-      const joiner = '\n' + indentOf(map.source, entry.outerStart);
-      newText = msg.parts.join(joiner);
+      if (!Array.isArray(msg.parts)) return;
+      if (msg.parts.length === 0) {
+        // element deletion — consume the element's whole line when possible
+        const del = deletionRange(map.source, entry.outerStart, entry.outerEnd);
+        rangeStart = del.start;
+        rangeEnd = del.end;
+        newText = '';
+      } else {
+        rangeStart = entry.outerStart;
+        rangeEnd = entry.outerEnd;
+        const joiner = '\n' + indentOf(map.source, entry.outerStart);
+        newText = msg.parts.join(joiner);
+      }
     }
 
     const edit = new vscode.WorkspaceEdit();

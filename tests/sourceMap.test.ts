@@ -9,6 +9,7 @@ import {
   regionOf,
   indentOf,
   deepestContaining,
+  deletionRange,
   DeckMap,
   ElementInfo,
 } from '../src/sourceMap';
@@ -259,6 +260,37 @@ test('external patch flow: an undo-style revert maps to one element region', () 
   assert.equal(rebuilt!.next.source.slice(root.innerStart, root.innerEnd), 'One');
   // everything outside the li kept its identity
   assert.equal(entryByTag(rebuilt!.next, 'table').id, entryByTag(map1, 'table').id);
+});
+
+test('deletionRange consumes the whole line for an element on its own line', () => {
+  const map = buildDeck(DECK);
+  const h1 = entryByTag(map, 'h1');
+  const del = deletionRange(map.source, h1.outerStart, h1.outerEnd);
+  const deleted = map.source.slice(del.start, del.end);
+  assert.equal(deleted, '  <h1>Hello</h1>\n');
+  // inline element (strong sits mid-line): range stays exact
+  const strong = entryByTag(map, 'strong');
+  const del2 = deletionRange(map.source, strong.outerStart, strong.outerEnd);
+  assert.equal(del2.start, strong.outerStart);
+  assert.equal(del2.end, strong.outerEnd);
+});
+
+test('element deletion: empty region rebuild keeps everything else stable', () => {
+  const map = buildDeck(DECK);
+  const h1 = entryByTag(map, 'h1');
+  const del = deletionRange(map.source, h1.outerStart, h1.outerEnd);
+  const newSource = map.source.slice(0, del.start) + map.source.slice(del.end);
+  const res = rebuildAfterEdit(map, newSource, regionOf(map, h1));
+  assert.ok(res);
+  assert.equal(res!.freshIds.length, 0);
+  assert.deepEqual(
+    res!.next.order.map((e) => e.tag),
+    ['div', 'ul', 'li', 'li', 'strong', 'table', 'tbody', 'tr', 'td']
+  );
+  assert.equal(entryByTag(res!.next, 'ul').id, entryByTag(map, 'ul').id);
+  assert.equal(entryByTag(res!.next, 'table').id, entryByTag(map, 'table').id);
+  assert.ok(!res!.next.source.includes('Hello'));
+  assert.ok(!res!.next.source.includes('\n\n  <ul>'), 'no blank line left behind');
 });
 
 test('sequential edits keep converging', () => {

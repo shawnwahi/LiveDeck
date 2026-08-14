@@ -109,6 +109,21 @@ Never editable: anything inside `svg`, `canvas`, `script`, `style`, `iframe`,
 form controls — and any element without a `data-ld-id` stamp (i.e. created at
 runtime by deck scripts, not present in the source).
 
+**Element selection & deletion**: Escape from editing selects the edited
+element; ⌥+click selects the text root or, failing that, the nearest
+source-mapped element (this is how images/svg become deletable). Backspace on
+a selection removes the element locally and sends an outer op with empty
+`parts`; the provider maps that to `deletionRange` (consuming the element's
+own line so no blank line is left) and the region rebuild yields zero fresh
+ids. Undo restores it through the in-place patch path.
+
+**Zoom**: `autoZoom` (default on, off once the user touches zoom controls,
+persisted) shrinks to fit the panel width, capped at 100%, re-running on
+panel resize. Self-fitting decks are handled separately: after load (and at
+the 150ms settle), a synthetic `resize` event is dispatched into the deck so
+its own fit logic recomputes against final dimensions — their post-transform
+size doesn't register as overflow, so autoFit correctly leaves them at 100%.
+
 Alignment is applied by setting `style="text-align:…"` on the root ourselves
 (not `execCommand`) because it mutates the root's own attributes, which an
 inner-edit would not capture — hence an outer op.

@@ -26,6 +26,8 @@
     slideIdx: 0,
     zoom: 1,
     fitMode: false,
+    autoZoom: true, // fit-on-open until the user touches zoom controls
+    selected: null, // element-selection mode (Esc from editing / ⌥-click)
     savedRange: null,
     pasteRichOnce: false,
     hoverEl: null,
@@ -330,6 +332,50 @@
     }
   }
 
+  // ------------------------------------------------- element selection mode
+
+  function select(el) {
+    deselect();
+    if (state.editing) deactivate();
+    state.selected = el;
+    el.classList.add('ld-selected');
+    updateCrumb(el);
+    const crumb = $('#crumb');
+    if (crumb.textContent) crumb.textContent += '  —  ⌫ delete · Esc dismiss';
+  }
+
+  function deselect() {
+    if (!state.selected) return;
+    const el = state.selected;
+    state.selected = null;
+    el.classList.remove('ld-selected');
+    if (el.getAttribute('class') === '') el.removeAttribute('class');
+    updateCrumb(state.editing ? state.editing.root : null);
+  }
+
+  function deleteSelected() {
+    const el = state.selected;
+    if (!el || !el.isConnected || !el.getAttribute('data-ld-id')) { deselect(); return; }
+    const oldId = el.getAttribute('data-ld-id');
+    const tag = el.tagName.toLowerCase();
+    deselect();
+    el.remove();
+    enqueue({ kind: 'outer', oldId, els: [] });
+    toast('Deleted <' + tag + '> — ⌘Z to undo');
+  }
+
+  /** Element a ⌥-click selects: the text root if there is one, else the
+   *  nearest source-mapped element (makes images/svg/charts selectable). */
+  function selectionTarget(target) {
+    const doc = state.doc;
+    const root = findRoot(target);
+    if (root) return root;
+    if (!target.closest) return null;
+    const el = target.closest('[data-ld-id]');
+    if (!el || el === doc.body || el === doc.documentElement) return null;
+    return el;
+  }
+
   function caretToStart(el) {
     const doc = state.doc;
     const sel = doc.getSelection();
@@ -552,6 +598,7 @@
     const scroll = preserve ? captureScrollState() : null;
 
     state.editing = null;
+    state.selected = null;
     state.dirty.clear();
     state.opQueue = [];
     state.pending = null;
@@ -589,7 +636,15 @@
       if (state.frame !== frame) return;
       if (frame.contentDocument) finishWire(frame.contentDocument);
       restoreScrollState(scroll);
-      setTimeout(() => { if (state.frame === frame) restoreScrollState(scroll); }, 150);
+      nudgeDeckResize();
+      autoFit();
+      setTimeout(() => {
+        if (state.frame !== frame) return;
+        restoreScrollState(scroll);
+        nudgeDeckResize();
+        autoFit();
+        detectSlides();
+      }, 150);
       detectSlides();
       if (state.fitMode) fitWidth();
     });
@@ -607,6 +662,7 @@
     style.setAttribute('data-livedeck', '');
     style.textContent = `
       .ld-hover { outline: 1.5px dashed rgba(64,156,255,.65) !important; outline-offset: 2px; cursor: text; }
+      .ld-selected { outline: 2.5px solid rgba(255,145,60,.95) !important; outline-offset: 2px; background-color: rgba(255,145,60,.07); }
       .ld-editing { outline: 2px solid rgba(64,156,255,.9) !important; outline-offset: 2px; }
       .ld-editing:focus { outline: 2px solid rgba(64,156,255,.9) !important; }
       [contenteditable="true"]:empty::before { content: '\\200b'; }
@@ -619,6 +675,15 @@
     const win = doc.defaultView;
 
     doc.addEventListener('mousedown', (e) => {
+      if (e.altKey) {
+        const target = selectionTarget(e.target);
+        if (target) {
+          e.preventDefault();
+          select(target);
+          return;
+        }
+      }
+      if (state.selected) deselect();
       const root = findRoot(e.target);
       if (root) {
         if (!state.editing || state.editing.root !== root) activate(root, e);
@@ -655,13 +720,14 @@
     doc.addEventListener('drop', (e) => e.preventDefault(), true);
 
     doc.addEventListener('mouseover', (e) => {
-      const root = findRoot(e.target);
+      // with ⌥ held, preview what a select-click would grab (incl. images)
+      const root = e.altKey ? selectionTarget(e.target) : findRoot(e.target);
       if (state.hoverEl && state.hoverEl !== root) {
         state.hoverEl.classList.remove('ld-hover');
         if (state.hoverEl.getAttribute('class') === '') state.hoverEl.removeAttribute('class');
         state.hoverEl = null;
       }
-      if (root && (!state.editing || state.editing.root !== root)) {
+      if (root && root !== state.selected && (!state.editing || state.editing.root !== root)) {
         root.classList.add('ld-hover');
         state.hoverEl = root;
       }
@@ -737,6 +803,21 @@
       state.pasteRichOnce = true; return; // let the paste event through untouched
     }
 
+    if (state.selected && !state.editing) {
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault();
+        e.stopPropagation();
+        deleteSelected();
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        deselect();
+        return;
+      }
+    }
+
     if (!state.editing) {
       if (e.key === 'PageDown') { e.preventDefault(); gotoSlide(state.slideIdx + 1); }
       else if (e.key === 'PageUp') { e.preventDefault(); gotoSlide(state.slideIdx - 1); }
@@ -780,7 +861,13 @@
       e.preventDefault(); showLinkPop(); return;
     }
     if (e.key === 'Escape') {
-      e.preventDefault(); deactivate(); return;
+      // PowerPoint-style: Esc steps up from text editing to element
+      // selection (where ⌫ deletes); Esc again dismisses.
+      e.preventDefault();
+      const edited = root;
+      deactivate();
+      if (edited.isConnected) select(edited);
+      return;
     }
 
     const sel = doc.getSelection();
@@ -889,13 +976,50 @@
     f.style.height = `${100 / z}%`;
     f.style.transform = `scale(${z})`;
     $('#zoom-ind').textContent = `${Math.round(z * 100)}%`;
-    vscode.setState({ zoom: z });
+    vscode.setState({ zoom: z, fitMode: state.fitMode, autoZoom: state.autoZoom });
   }
 
+  /** Manual zoom (buttons/shortcuts): takes over from auto-fit. */
   function setZoom(z, fit) {
     state.zoom = Math.max(0.3, Math.min(3, z));
     state.fitMode = !!fit;
+    state.autoZoom = false;
     applyZoom();
+  }
+
+  /**
+   * Self-fitting decks compute their scale from window dimensions in a
+   * load-time script, which can run before the iframe's final layout and
+   * never re-run (nothing resizes afterwards). Dispatching a resize lets
+   * them recompute against the real dimensions.
+   */
+  function nudgeDeckResize() {
+    try {
+      const w = state.frame && state.frame.contentWindow;
+      if (w) w.dispatchEvent(new w.Event('resize'));
+    } catch (err) { /* deck without a window yet */ }
+  }
+
+  /**
+   * Auto zoom: shrink (never grow past 100%) so the deck's content width
+   * fits the panel. Content transformed smaller by a self-fitting deck
+   * doesn't count as overflow (scrollable overflow is post-transform), so
+   * this leaves such decks at 100%. Active until the user touches zoom.
+   */
+  function autoFit() {
+    if (!state.autoZoom || !state.doc || !state.doc.documentElement) return;
+    const holder = $('#frame-holder');
+    const d = state.doc;
+    const natural = Math.max(
+      d.documentElement.scrollWidth,
+      d.body ? d.body.scrollWidth : 0
+    );
+    if (!natural || !holder.clientWidth) return;
+    const zTarget = Math.max(0.3, Math.min(1, holder.clientWidth / natural));
+    if (Math.abs(zTarget - state.zoom) > 0.02) {
+      state.zoom = zTarget;
+      applyZoom();
+    }
   }
 
   function fitWidth() {
@@ -1077,7 +1201,11 @@
     if (e.key === 'Enter') { e.preventDefault(); applyLink(false); }
     if (e.key === 'Escape') hideLinkPop();
   });
-  window.addEventListener('resize', () => { if (state.fitMode) fitWidth(); });
+  window.addEventListener('resize', () => {
+    if (state.fitMode) fitWidth();
+    // iframe resize propagates natively; re-run auto-fit once layout settles
+    else if (state.autoZoom) requestAnimationFrame(autoFit);
+  });
 
   // --------------------------------------------------------------- messages
 
@@ -1105,6 +1233,9 @@
           const r = state.editing.root;
           if (r === el || el.contains(r) || r.contains(el)) deactivate(false);
         }
+        if (state.selected && (state.selected === el || el.contains(state.selected) || state.selected.contains(el))) {
+          deselect();
+        }
         el.innerHTML = msg.html;
         const els = [el, ...el.querySelectorAll('*')];
         if (els.length !== msg.ids.length) { requestReload('patch stamp mismatch'); break; }
@@ -1123,7 +1254,12 @@
   });
 
   const persisted = vscode.getState();
-  if (persisted && persisted.zoom) state.zoom = persisted.zoom;
+  if (persisted && persisted.autoZoom === false && persisted.zoom) {
+    // the user had explicitly chosen a zoom — keep honoring it
+    state.zoom = persisted.zoom;
+    state.fitMode = !!persisted.fitMode;
+    state.autoZoom = false;
+  }
 
   updateToolbar();
   post({ type: 'ready' });

@@ -2,7 +2,7 @@
   "name": "livedeck",
   "displayName": "LiveDeck — Inline HTML Deck Editor",
   "description": "Edit HTML slide decks in place, PowerPoint-style. Click into any text, type, format, add bullets — every change is written back to the HTML file as a minimal, surgical edit.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "celltype",
   "license": "MIT",
   "repository": {

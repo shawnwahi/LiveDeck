@@ -225,6 +225,27 @@ export function deepestContaining(map: DeckMap, lo: number, hi: number): Element
   return best;
 }
 
+/**
+ * Range to remove when deleting an element outright: if the element sits on
+ * its own line(s), consume the leading indentation and the trailing newline
+ * too, so the deletion doesn't leave a blank line behind.
+ */
+export function deletionRange(
+  source: string,
+  outerStart: number,
+  outerEnd: number
+): { start: number; end: number } {
+  const lineStart = source.lastIndexOf('\n', outerStart - 1) + 1;
+  if (/^[ \t]*$/.test(source.slice(lineStart, outerStart))) {
+    const nl = source.indexOf('\n', outerEnd);
+    const tail = nl === -1 ? source.slice(outerEnd) : source.slice(outerEnd, nl);
+    if (/^[ \t\r]*$/.test(tail)) {
+      return { start: lineStart, end: nl === -1 ? source.length : nl + 1 };
+    }
+  }
+  return { start: outerStart, end: outerEnd };
+}
+
 /** Leading whitespace of the line an element starts on (used to indent multi-part writes). */
 export function indentOf(source: string, offset: number): string {
   let lineStart = source.lastIndexOf('\n', offset - 1) + 1;

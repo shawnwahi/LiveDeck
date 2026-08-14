@@ -10,6 +10,8 @@ Asking an LLM to "fix the wording on slide 4" sometimes rewrites half the file. 
 - **Click-to-edit** — hover highlights editable text blocks (headings, paragraphs, bullets, table cells); click to place the caret and type. Escape or click elsewhere to finish.
 - **Formatting** — bold / italic / underline / strikethrough (⌘B/⌘I/⌘U), inline `code`, links (⌘K), clear formatting, left/center/right alignment.
 - **Bullets like PowerPoint** — Enter adds a bullet, Enter on an empty bullet exits the list, Tab/Shift+Tab indent/outdent, Alt+↑/↓ reorder, and the toolbar converts paragraphs ⇄ bulleted/numbered lists.
+- **Delete whole elements** — Escape while editing selects the element (PowerPoint-style), or ⌥+click selects anything directly, including images and SVG figures; Backspace/Delete removes it from the file (whole line, no blank residue), ⌘Z brings it back.
+- **Fits your screen on open** — decks open auto-fitted to the panel (never above 100%), re-fit when you move between monitors, and self-scaling decks get a resize nudge so their own fit logic computes against real dimensions. Manual zoom takes over the moment you touch it.
 - **Theme-matching by construction** — edits are made inside the deck's own DOM, so new text inherits the deck's fonts, colors, and spacing. Formatting writes semantic tags (`<strong>`, `<em>`), and paste is plain-text by default (⌘⇧V pastes rich) so outside styling can't pollute the theme.
 - **Surgical writes** — each edit replaces exactly one element's inner/outer HTML in the source file, with the file's original whitespace and indentation preserved everywhere else.
 - **Live two-way sync** — the file is a normal `TextDocument`: undo/redo (⌘Z) and save (⌘S) work, the dirty dot tracks unsaved changes, and if Claude (or you, in a split source view) edits the file, the deck updates in place. Localized changes — including undo/redo — are patched into the live DOM without reloading the deck, so deck scripts and their state (like the current slide) survive.
@@ -54,7 +56,9 @@ Try it on `examples/demo.html`.
 | Shift+Enter | Line break |
 | Tab / Shift+Tab | Indent / outdent bullet |
 | Alt+↑ / Alt+↓ | Move bullet up / down |
-| Escape | Finish editing the current block |
+| Escape (while editing) | Select the element (press again to dismiss) |
+| ⌥+click | Select any element (works on images/SVG too) |
+| Backspace / Delete (element selected) | Delete the element |
 | ⌘Z / ⇧⌘Z | Undo / redo (applies to the file) |
 | ⌘S | Save |
 | ⌘⇧V | Paste with original formatting |
