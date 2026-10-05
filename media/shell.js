@@ -226,6 +226,7 @@
     const op = state.pending;
     state.pending = null;
     state.mapVersion = msg.mapVersion;
+    publishSelection(); // ids and source moved; runs after this ack settles
     if (op) {
       const els = [];
       for (const rootEl of op.regionEls) {
@@ -255,6 +256,7 @@
     const op = state.pending;
     state.pending = null;
     state.mapVersion = msg.mapVersion;
+    publishSelection(); // ids and source moved; runs after this ack settles
     if (op && op.kind === 'struct' && op.onAck && !msg.noop) {
       try {
         if (op.onAck(msg) === false) { requestReload('struct ack mismatch'); return; }
@@ -979,7 +981,31 @@
     return stamped(el) || (el && el.isConnected && el === state.selected) ? el : null;
   }
 
+  /** Tell the host what is selected (or being edited), so coding agents can
+   *  ask LiveDeck what "this" refers to. Debounced; only sends changes. */
+  let selTimer = 0;
+  let selKey = '';
+  function publishSelection() {
+    clearTimeout(selTimer);
+    selTimer = setTimeout(() => {
+      const els = selectedEls();
+      const editing = !els.length && state.editing && state.editing.root.isConnected ? state.editing.root : null;
+      const items = (editing ? [editing] : els)
+        .filter((el) => el.getAttribute('data-ld-id'))
+        .map((el) => ({
+          id: el.getAttribute('data-ld-id'),
+          slide: state.slides.findIndex((s) => s === el || s.contains(el)) + 1,
+          editing: el === editing,
+        }));
+      const key = state.mapVersion + JSON.stringify(items);
+      if (key === selKey) return;
+      selKey = key;
+      post({ type: 'selection', mapVersion: state.mapVersion, items });
+    }, 150);
+  }
+
   function refreshOverlay() {
+    publishSelection();
     const box = $('#sel-box');
     if (!box) return;
     const el = state.doc && overlayTarget();
@@ -2034,6 +2060,7 @@
   // ---------------------------------------------------------------- toolbar
 
   function updateCrumb(root) {
+    publishSelection();
     const crumb = $('#crumb');
     if (!root) { crumb.textContent = ''; return; }
     let slidePart = '';
