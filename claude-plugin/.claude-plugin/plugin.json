@@ -1,0 +1,10 @@
+{
+  "name": "livedeck",
+  "displayName": "LiveDeck",
+  "version": "0.4.0",
+  "description": "Open HTML slide decks in the LiveDeck editor (Preview pane / any browser) and let Claude see which slide elements you selected.",
+  "author": { "name": "CellType" },
+  "homepage": "https://github.com/shawnwahi/LiveDeck",
+  "repository": "https://github.com/shawnwahi/LiveDeck",
+  "license": "MIT"
+}

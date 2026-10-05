@@ -1,0 +1,15 @@
+{
+  "name": "livedeck",
+  "description": "LiveDeck: edit HTML slide decks in place, next to Claude.",
+  "owner": {
+    "name": "CellType",
+    "url": "https://github.com/shawnwahi/LiveDeck"
+  },
+  "plugins": [
+    {
+      "name": "livedeck",
+      "source": "./claude-plugin",
+      "description": "Open HTML decks in the LiveDeck editor in the Preview pane, and let Claude see what you selected in them."
+    }
+  ]
+}
