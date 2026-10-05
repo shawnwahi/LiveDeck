@@ -478,6 +478,13 @@ class DeckSession {
           await vscode.env.openExternal(this.document.uri);
         }
         break;
+      case 'clipboardWrite':
+        if (typeof msg.text === 'string') await vscode.env.clipboard.writeText(msg.text);
+        this.post({ type: 'clipboardText', reqId: msg.reqId });
+        break;
+      case 'clipboardRead':
+        this.post({ type: 'clipboardText', reqId: msg.reqId, text: await vscode.env.clipboard.readText() });
+        break;
       case 'openExternal':
         if (typeof msg.url === 'string' && /^https?:/i.test(msg.url)) {
           await vscode.env.openExternal(vscode.Uri.parse(msg.url));

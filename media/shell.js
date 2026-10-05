@@ -1640,11 +1640,9 @@
         return;
       }
       if (!state.editing) return;
-      if (state.pasteRichOnce) { state.pasteRichOnce = false; return; }
-      if (!state.config.pastePlainText) return;
       e.preventDefault();
-      const text = e.clipboardData.getData('text/plain');
-      if (text) doc.execCommand('insertText', false, text);
+      insertClipboard(e.clipboardData.getData('text/plain'), e.clipboardData.getData('text/html'), state.pasteRichOnce);
+      state.pasteRichOnce = false;
     }, true);
 
     doc.addEventListener('selectionchange', () => {
@@ -1701,8 +1699,16 @@
     if (mod && e.key.toLowerCase() === 's') {
       e.preventDefault(); flushDirty(); post({ type: 'save' }); return;
     }
-    if (mod && e.shiftKey && e.key.toLowerCase() === 'v') {
-      state.pasteRichOnce = true; return; // let the paste event through untouched
+    // Clipboard. The editor host runs ⌘C/⌘X/⌘V against LiveDeck's outer
+    // document, never this nested deck document, so we do it ourselves.
+    if (mod && !e.altKey && ['c', 'x', 'v'].includes(e.key.toLowerCase())) {
+      const k = e.key.toLowerCase();
+      e.preventDefault();
+      e.stopPropagation();
+      state.lastClipKey = Date.now();
+      if (k === 'v') clipboardPaste(e.shiftKey);
+      else clipboardCopy(k === 'x');
+      return;
     }
 
     if (state.drag && e.key === 'Escape') {
@@ -2122,6 +2128,101 @@
     updateToolbar();
   }
 
+  // clipboard -----------------------------------------------------------------
+
+  const clipReqs = new Map();
+  let clipReqSeq = 0;
+
+  /** Host round-trip to vscode.env.clipboard — always available, text only. */
+  function hostClipboard(msg) {
+    return new Promise((resolve) => {
+      const reqId = ++clipReqSeq;
+      clipReqs.set(reqId, resolve);
+      post(Object.assign({ reqId }, msg));
+      setTimeout(() => { if (clipReqs.delete(reqId)) resolve(null); }, 3000);
+    });
+  }
+
+  /** Text of the current deck selection, or of the selected element(s). */
+  function selectionText() {
+    const doc = state.doc;
+    const sel = doc && doc.getSelection();
+    if (sel && !sel.isCollapsed && sel.rangeCount) return sel.toString();
+    const els = selectedEls();
+    return els.length ? els.map((el) => el.innerText.trim()).join('\n\n') : '';
+  }
+
+  function clipboardCopy(cut) {
+    const doc = state.doc;
+    if (!doc) return;
+    if (state.editing) restoreSelection();
+    const text = selectionText();
+    if (!text) return;
+    const sel = doc.getSelection();
+    const hasRange = sel && !sel.isCollapsed;
+    // execCommand('copy') keeps rich HTML on the clipboard; fall back to the host
+    let ok = false;
+    if (hasRange) { try { ok = doc.execCommand('copy'); } catch (err) { ok = false; } }
+    if (!ok) hostClipboard({ type: 'clipboardWrite', text });
+    if (cut && hasRange && state.editing && state.editing.root.contains(sel.anchorNode)) {
+      doc.execCommand('delete');
+      markDirty(state.editing.root);
+    }
+  }
+
+  async function clipboardPaste(rich) {
+    const doc = state.doc;
+    if (!doc) return;
+    if (state.editing) restoreSelection();
+    state.pasteRichOnce = rich;
+    // 1. a native paste (fires our 'paste' handler, which does the work)
+    try { if (doc.execCommand('paste')) return; } catch (err) { /* not allowed */ }
+    state.pasteRichOnce = false;
+    // 2. async clipboard API: images and rich HTML
+    try {
+      const items = await doc.defaultView.navigator.clipboard.read();
+      for (const item of items) {
+        const img = item.types.find((t) => t.startsWith('image/'));
+        if (img) {
+          const blob = await item.getType(img);
+          addImages([new File([blob], 'image.' + img.split('/')[1].replace('svg+xml', 'svg'), { type: img })], pastePlacement());
+          return;
+        }
+      }
+      const item = items[0];
+      if (item && state.editing) {
+        const text = item.types.includes('text/plain') ? await (await item.getType('text/plain')).text() : '';
+        const html = item.types.includes('text/html') ? await (await item.getType('text/html')).text() : '';
+        if (text || html) { insertClipboard(text, html, rich); return; }
+      }
+    } catch (err) { /* permission denied or unsupported */ }
+    // 3. the extension host's clipboard (text)
+    if (!state.editing) return;
+    const res = await hostClipboard({ type: 'clipboardRead' });
+    if (res && res.text) insertClipboard(res.text, '', false);
+  }
+
+  /** Insert pasted content at the caret of the text being edited. Plain text
+   *  by default (keeps the deck's theme); ⌘⇧V or pastePlainText:false keeps HTML. */
+  function insertClipboard(text, html, rich) {
+    if (!state.editing) return;
+    const doc = state.doc;
+    const root = state.editing.root;
+    root.focus({ preventScroll: true });
+    restoreSelection();
+    const sel = doc.getSelection();
+    if (!sel.rangeCount || !root.contains(sel.anchorNode)) {
+      const r = doc.createRange();
+      r.selectNodeContents(root);
+      r.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    if (html && (rich || !state.config.pastePlainText)) doc.execCommand('insertHTML', false, html);
+    else if (text) doc.execCommand('insertText', false, text);
+    markDirty(root);
+  }
+
   // AI this element ---------------------------------------------------------
 
   let aiReqSeq = 0;
@@ -2283,11 +2384,39 @@
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { closeMenu(); if (state.resize) endResize(true); }
   });
+  // The editor runs Copy/Cut/Paste (menu, keybinding) on this outer
+  // document; redirect them to the deck.
+  // (skipped when the deck already handled the keypress itself)
+  const inShellInput = (e) => (e.target && e.target.closest && e.target.closest('input,textarea'))
+    || Date.now() - (state.lastClipKey || 0) < 400;
   document.addEventListener('paste', (e) => {
-    if (e.target.closest && e.target.closest('input,textarea')) return;
+    if (inShellInput(e) || !state.doc) return;
     const files = imageFiles(e.clipboardData);
-    if (files.length && state.doc) { e.preventDefault(); addImages(files, pastePlacement()); }
+    if (files.length) { e.preventDefault(); addImages(files, pastePlacement()); return; }
+    if (!state.editing) return;
+    e.preventDefault();
+    insertClipboard(e.clipboardData.getData('text/plain'), e.clipboardData.getData('text/html'), false);
   });
+  const shellCopy = (cut) => (e) => {
+    if (inShellInput(e) || !state.doc) return;
+    if (state.editing) restoreSelection();
+    const sel = state.doc.getSelection();
+    const text = selectionText();
+    if (!text) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', text);
+    if (sel && !sel.isCollapsed && sel.rangeCount) {
+      const div = document.createElement('div');
+      div.appendChild(sel.getRangeAt(0).cloneContents());
+      e.clipboardData.setData('text/html', div.innerHTML);
+      if (cut && state.editing && state.editing.root.contains(sel.anchorNode)) {
+        state.doc.execCommand('delete');
+        markDirty(state.editing.root);
+      }
+    }
+  };
+  document.addEventListener('copy', shellCopy(false));
+  document.addEventListener('cut', shellCopy(true));
   window.addEventListener('blur', closeMenu);
   $('#ai-run').addEventListener('click', runAi);
   $('#ai-close').addEventListener('click', closeAi);
@@ -2330,6 +2459,12 @@
       case 'aiDone':
         onAiDone(msg);
         break;
+      case 'clipboardText': {
+        const resolve = clipReqs.get(msg.reqId);
+        clipReqs.delete(msg.reqId);
+        if (resolve) resolve(msg);
+        break;
+      }
       case 'patch': {
         // Localized external change (undo/redo, a scoped edit by an agent):
         // swap one element's content in place instead of re-rendering the

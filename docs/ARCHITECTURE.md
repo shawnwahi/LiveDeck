@@ -209,6 +209,15 @@ inner-edit would not capture — hence an outer op.
   `applyEdit`): full re-render from the file. The file is never written from a
   mapping we could not verify.
 
+**Clipboard**: the editor runs Copy/Cut/Paste against the webview's outer
+document, never the nested deck document, so ⌘C/⌘X/⌘V are handled in the
+deck's keydown: copy via `execCommand('copy')` (rich), falling back to the
+host's `vscode.env.clipboard`; paste via a native `execCommand('paste')`,
+then the async clipboard API (images, HTML), then the host's text
+clipboard. Copy/cut/paste events that do land on the outer document (menu
+commands) are redirected into the deck, de-duplicated against a keypress
+the deck already handled.
+
 Undo/redo/save are forwarded from the webview (key events inside the iframe
 never reach VS Code) and executed as regular VS Code commands against the
 document.

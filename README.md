@@ -79,6 +79,7 @@ Try it on `examples/demo.html`.
 | Backspace / Delete (element selected) | Delete the element |
 | ⌘Z / ⇧⌘Z | Undo / redo (applies to the file) |
 | ⌘S | Save |
+| ⌘C / ⌘X / ⌘V | Copy / cut / paste text (between text boxes, and to/from other apps) |
 | ⌘⇧V | Paste with original formatting |
 | PgUp / PgDn | Previous / next slide (when not editing) |
 | ⌘+click a link | Open it in your browser |
