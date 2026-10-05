@@ -120,6 +120,14 @@ Every edit is written to the file at once (there is no Save step, so the agent a
   command = "livedeck"
   args = ["mcp"]
   ```
+  Codex has no plugin skill, so tell it when to use the tool. Add this to your deck project's `AGENTS.md`:
+  ```markdown
+  ## Slide decks open in LiveDeck
+  When I say "this", "these", "here" or "the selected …" about an HTML deck, call the
+  livedeck `get_selection` tool first. Edit only the returned element's source range,
+  matching existing markup. If an item is `stale`, ask me to reselect it. Never add
+  `data-ld-*` attributes.
+  ```
 
 The selection is kept in `~/.livedeck/selection/`, outside your project. Nothing is added to your repo.
 

@@ -15,4 +15,5 @@ claude-plugin/
 esbuild.mjs
 tsconfig.json
 CLAUDE.md
+AGENTS.md
 .DS_Store
