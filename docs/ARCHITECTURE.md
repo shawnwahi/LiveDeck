@@ -12,23 +12,25 @@ performs only *scoped* writes: one element's inner/outer HTML at a time.
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ Extension host (Node)                                      │
-│  extension.ts            commands, registration            │
-│  deckEditorProvider.ts   CustomTextEditorProvider          │
-│    DeckSession           1 per open editor:                │
-│                          document ⇄ webview protocol       │
+│ Host (Node)                                                │
+│  deckSession.ts          DeckSession, 1 per open editor:   │
+│                          document ⇄ shell protocol         │
+│                          (never imports vscode)            │
+│    HostAdapter ── vscodeAdapter.ts   TextDocument/webview  │
+│                └─ server/serve.ts    file on disk/browser  │
 │  sourceMap.ts            parse5 mapping (the core)         │
+│  extension.ts / deckEditorProvider.ts   VS Code entry      │
+│  cli.ts                  `livedeck` serve / mcp entry      │
 └──────────────▲─────────────────────────────────────────────┘
-               │ postMessage protocol
+               │ postMessage protocol (SSE + POST in a browser)
 ┌──────────────▼─────────────────────────────────────────────┐
-│ Webview (media/shell.js + shell.css)                       │
+│ Shell (media/shell.js + shell.css; shellHtml.ts)           │
 │  toolbar, zoom, slide nav, link popover, toasts            │
 │  <iframe> ← deck HTML written via document.write           │
 │    same-origin: shell manipulates contentDocument directly │
 │    click-to-edit, contenteditable, op pipeline             │
 └────────────────────────────────────────────────────────────┘
 ```
-
 The deck iframe is same-origin with the webview (loaded via `srcdoc`), so
 `shell.js` attaches listeners and mutates the deck DOM directly. It must stay
 `srcdoc`: `document.open()`/`write()` nulls the document's service-worker
@@ -47,6 +49,40 @@ Every rewritten attribute on a *body* element gets a `data-ld-orig-*` twin;
 `serializeClean` restores the originals before write-back, so data URIs never
 reach the user's file. Head elements are never serialized back, so they are
 rewritten without stamps.
+
+## Hosts
+
+`DeckSession` implements the whole edit protocol against a `HostAdapter`:
+read the text, replace one range (one undo step), change events in old-text
+offsets, post to the shell, plus the editor services (undo/redo/save,
+clipboard, image picker, reveal, API key). New features that need something
+from the editor go through the adapter, implemented once per host; features
+in `shell.js`, `sourceMap.ts` or `structOps.ts` work in both unchanged.
+
+- **VS Code** (`vscodeAdapter.ts`): a `TextDocument` edited with
+  `WorkspaceEdit`s; undo/redo/save are the editor's commands.
+- **Standalone** (`server/`, `livedeck serve`): `FileDocument` holds the text,
+  writes every edit to disk immediately (agents read the file, so a dirty
+  buffer would hide edits from them), keeps its own undo/redo (refusing when
+  someone else changed the range since), and watches the deck's directory.
+  An outside write becomes a single minimal change (common prefix/suffix), so
+  the usual `tryPatch` path patches it in place. `serve.ts` serves the shell
+  with `media/bridge.js`, which defines `acquireVsCodeApi()`: host → page over
+  Server-Sent Events, page → host as POSTs chained so they arrive in order
+  (invariant 5). Clipboard, the image file picker and new tabs are handled in
+  the browser. Several tabs may share one `FileDocument`; each has its own
+  session and sees the others' edits as external changes. The server binds to
+  loopback only, rejects other `Host` headers (DNS rebinding), and requires a
+  custom header on POSTs, which cross-origin pages can't send without a
+  preflight the server never grants.
+
+**Selection for agents.** The shell reports the selected elements (or the
+text root being edited) as `{type:'selection'}`; the session resolves ids to
+source ranges and writes them to `~/.livedeck/selection/<hash>.json`
+(`selection.ts`). `livedeck mcp` (`mcp.ts`, dependency-free stdio JSON-RPC)
+serves `get_selection`, re-anchoring each item against the current file: at
+its offsets, else at the single place its exact source still occurs, else
+`stale`. Agents edit with their own tools; LiveDeck never writes on their behalf.
 
 ## Source mapping (`sourceMap.ts`)
 

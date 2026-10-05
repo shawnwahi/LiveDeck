@@ -8,9 +8,14 @@ touching the edit protocol.
 
 - `npm run build` — bundle to `dist/extension.js` (esbuild, parse5 bundled in)
 - `npm run typecheck` — tsc, no emit
-- `npm test` — unit tests for `sourceMap`, `structOps`, `resources`, `aiEdit` (node:test)
+- `npm test` — unit tests (node:test): `sourceMap`, `structOps`, `resources`,
+  `aiEdit`, the standalone server (`fileDocument`, `serve`), `selection`/MCP
+- `npm run serve -- examples/demo.html` — build, then run the editor in a browser
+  (`dist/livedeck.js` is the `livedeck` CLI: `serve`, `init-claude`, `mcp`)
 - `npm run package` — build + `vsce package` → installable `.vsix`
-- `media/shell.js` is plain JS (no build step); check with `node --check`
+- `media/shell.js` / `media/bridge.js` are plain JS (no build step); check with `node --check`
+- `claude plugin validate . && claude plugin validate ./claude-plugin` — check the
+  Claude Code plugin (`claude-plugin/`) and its marketplace entry
 
 ## Invariants — do not break
 
@@ -27,4 +32,7 @@ touching the edit protocol.
    `mapVersion`, region count mismatch), fall back to a full re-render.
    Correctness beats caret preservation.
 5. Webview ops run strictly serially (`pending`/`opQueue`); payloads are
-   serialized at send time.
+   serialized at send time. In a browser, `bridge.js` keeps POSTs in order.
+6. `deckSession.ts` never imports `vscode`. Anything a feature needs from the
+   editor goes through `HostAdapter` and is implemented in both
+   `vscodeAdapter.ts` and `server/serve.ts`.

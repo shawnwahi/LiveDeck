@@ -13,3 +13,4 @@ CLAUDE.md
 dist/livedeck.js
 claude-plugin/**
 .claude-plugin/**
+.npmignore
