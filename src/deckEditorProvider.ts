@@ -11,6 +11,18 @@ import {
   DeckMap,
 } from './sourceMap';
 import { inlineResources, ResourceResolver, ResolvedResource } from './resources';
+import {
+  StructOp,
+  StructPlan,
+  applyStructPlan,
+  instrumentFragment,
+  planSource,
+  planStructOp,
+} from './structOps';
+import Anthropic from '@anthropic-ai/sdk';
+import { runAiEdit, validateReplacement } from './aiEdit';
+
+export const API_KEY_SECRET = 'livedeck.anthropicApiKey';
 
 const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -40,6 +52,21 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 const MAX_RESOURCE_BYTES = 48 * 1024 * 1024;
+
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp'];
+const EXT_FOR_MIME: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/svg+xml': 'svg',
+  'image/avif': 'avif',
+  'image/bmp': 'bmp',
+};
+
+function attrEscape(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
 
 interface EditMessage {
   type: 'edit';
@@ -181,6 +208,22 @@ export class DeckEditorProvider implements vscode.CustomTextEditorProvider {
 </div>
 <div id="frame-holder">
   <div id="splash">Loading deck…</div>
+  <div id="overlay">
+    <div id="sel-box" hidden>
+      <div class="h" data-dir="w" title="Drag to resize"></div>
+      <div class="h" data-dir="e" title="Drag to resize"></div>
+      <div class="h" data-dir="s" title="Drag to resize"></div>
+      <div class="h" data-dir="se" title="Drag to resize"></div>
+    </div>
+    <div id="drop-ind" hidden></div>
+    <div id="marquee" hidden></div>
+  </div>
+</div>
+<div id="ctx-menu" role="menu" hidden></div>
+<div id="ai-pop" hidden>
+  <div class="ai-head"><span>AI this element <span id="ai-target"></span></span><button id="ai-close" title="Close (Esc)">✕</button></div>
+  <textarea id="ai-input" rows="3" spellcheck="true" placeholder="e.g. tighten the phrasing · add a citation for this claim · make this two bullets"></textarea>
+  <div class="ai-foot"><span id="ai-status"></span><button id="ai-run">Run ↵</button></div>
 </div>
 <div id="toast" hidden></div>
 <script src="${media('shell.js')}"></script>
@@ -196,6 +239,7 @@ class DeckSession {
   private applyingSelfEdit = false;
   private externalReloadTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly disposables: vscode.Disposable[] = [];
+  private aiAbort: AbortController | null = null;
 
   constructor(
     private readonly document: vscode.TextDocument,
@@ -281,6 +325,11 @@ class DeckSession {
       pastePlainText: c.get<boolean>('pastePlainText') ?? true,
       normalizeMarkup: c.get<boolean>('normalizeMarkup') ?? true,
     };
+  }
+
+  private imageFolder(): string {
+    const c = vscode.workspace.getConfiguration('livedeck', this.document.uri);
+    return c.get<string>('imageFolder') ?? 'images';
   }
 
   private post(msg: unknown) {
@@ -386,6 +435,24 @@ class DeckSession {
       case 'edit':
         await this.handleEdit(msg as EditMessage);
         break;
+      case 'struct':
+        await this.handleStruct(msg);
+        break;
+      case 'saveImage':
+        await this.handleSaveImage(msg);
+        break;
+      case 'pickImage':
+        await this.handlePickImage(msg);
+        break;
+      case 'reveal':
+        await this.reveal(msg.id);
+        break;
+      case 'aiEdit':
+        await this.handleAiEdit(msg);
+        break;
+      case 'aiCancel':
+        this.aiAbort?.abort();
+        break;
       case 'requestReload':
         this.postInit();
         break;
@@ -410,6 +477,13 @@ class DeckSession {
         if (this.document.uri.scheme === 'file') {
           await vscode.env.openExternal(this.document.uri);
         }
+        break;
+      case 'clipboardWrite':
+        if (typeof msg.text === 'string') await vscode.env.clipboard.writeText(msg.text);
+        this.post({ type: 'clipboardText', reqId: msg.reqId });
+        break;
+      case 'clipboardRead':
+        this.post({ type: 'clipboardText', reqId: msg.reqId, text: await vscode.env.clipboard.readText() });
         break;
       case 'openExternal':
         if (typeof msg.url === 'string' && /^https?:/i.test(msg.url)) {
@@ -509,5 +583,325 @@ class DeckSession {
       mapVersion: this.map.version,
     });
     this.postDirty();
+  }
+
+  /**
+   * Structural op (duplicate / move / style / insertImage). The new text is
+   * built from source slices, never from serialized DOM; see structOps.ts.
+   * The webview has usually already rearranged its DOM, so on any failure
+   * we fully re-render.
+   */
+  private async handleStruct(msg: any) {
+    const map = this.map;
+    if (!map || msg.mapVersion !== map.version) {
+      this.postInit();
+      return;
+    }
+    let op: StructOp;
+    switch (msg.op) {
+      case 'duplicate':
+        op = { op: 'duplicate', id: String(msg.id) };
+        break;
+      case 'move':
+        op = { op: 'move', id: String(msg.id), targetId: String(msg.targetId), before: !!msg.before };
+        break;
+      case 'style': {
+        const props: Record<string, string | null> = {};
+        for (const [k, v] of Object.entries(msg.props ?? {})) {
+          if (!/^[a-z-]+$/i.test(k)) continue;
+          if (v !== null && (typeof v !== 'string' || /[;"<>{}]/.test(v))) continue;
+          props[k] = v as string | null;
+        }
+        op = { op: 'style', id: String(msg.id), props };
+        break;
+      }
+      case 'insertImage': {
+        const src = String(msg.src ?? '');
+        const width = Math.round(Number(msg.width));
+        if (!src || /^[a-z][a-z0-9+.-]*:/i.test(src)) return this.failStruct('bad image path');
+        const w = Number.isFinite(width) && width > 0 ? ` width="${width}"` : '';
+        // placed at a point: absolutely positioned inside its container
+        const left = Math.round(Number(msg.left));
+        const top = Math.round(Number(msg.top));
+        const at = Number.isFinite(left) && Number.isFinite(top)
+          ? ` style="position: absolute; left: ${left}px; top: ${top}px"`
+          : '';
+        op = {
+          op: 'insert',
+          anchorId: String(msg.anchorId),
+          where: msg.where === 'append' ? 'append' : 'after',
+          html: `<img src="${attrEscape(src)}" alt=""${w}${at}>`,
+        };
+        break;
+      }
+      default:
+        return;
+    }
+
+    const plan = planStructOp(map, op);
+    if ('error' in plan) {
+      // "no change" is benign: the webview made no DOM change worth undoing
+      if (plan.error === 'no change' || plan.error === 'already in place') {
+        this.post({ type: 'structAck', mapVersion: map.version, pairs: [], noop: true });
+        return;
+      }
+      return this.failStruct(plan.error);
+    }
+    const expected = planSource(map, plan);
+    if (!(await this.applyText(plan))) return this.failStruct('edit was not applied');
+    if (this.document.getText() !== expected) return this.failStruct('document changed concurrently');
+
+    const res = applyStructPlan(map, plan, expected, { baseHref: this.baseHref });
+    if (!res) return this.failStruct('could not verify the result');
+    this.map = res.next;
+    this.map.version = ++this.mapVersionCounter;
+    this.nextIdCounter = this.map.nextId;
+
+    let insertHtml: string | undefined;
+    if (op.op === 'insert') {
+      const pre = '<html><body>';
+      const post = '</body></html>';
+      const inlined = inlineResources(
+        pre + instrumentFragment(op.html, res.freshIds) + post,
+        this.makeResolver()
+      );
+      insertHtml = inlined.slice(pre.length, inlined.length - post.length);
+    }
+    this.post({
+      type: 'structAck',
+      mapVersion: this.map.version,
+      pairs: res.pairs,
+      insertHtml,
+      styleAttr: plan.styleAttr,
+    });
+    this.postDirty();
+  }
+
+  private failStruct(reason: string) {
+    this.post({ type: 'toast', text: `LiveDeck: ${reason} — reloaded from source` });
+    this.postInit();
+  }
+
+  private async applyText(plan: StructPlan): Promise<boolean> {
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(
+      this.document.uri,
+      new vscode.Range(this.document.positionAt(plan.start), this.document.positionAt(plan.end)),
+      plan.text
+    );
+    this.applyingSelfEdit = true;
+    try {
+      return await vscode.workspace.applyEdit(edit);
+    } finally {
+      this.applyingSelfEdit = false;
+    }
+  }
+
+  // ------------------------------------------------------------- images
+
+  private deckDir(): string | null {
+    return this.document.uri.scheme === 'file' ? path.dirname(this.document.uri.fsPath) : null;
+  }
+
+  /** Deck-relative, URL-encoded path for an absolute file path. */
+  private relSrc(abs: string): string {
+    const rel = path.relative(this.deckDir()!, abs).split(path.sep).join('/');
+    return rel.split('/').map(encodeURIComponent).join('/');
+  }
+
+  private async uniquePath(dir: string, base: string, ext: string): Promise<string> {
+    for (let n = 1; ; n++) {
+      const p = path.join(dir, `${base}${n === 1 ? '' : '-' + n}.${ext}`);
+      try {
+        await vscode.workspace.fs.stat(vscode.Uri.file(p));
+      } catch {
+        return p;
+      }
+    }
+  }
+
+  private async writeImage(bytes: Uint8Array, name: string, ext: string): Promise<string> {
+    const dir = path.resolve(this.deckDir()!, this.imageFolder());
+    await vscode.workspace.fs.createDirectory(vscode.Uri.file(dir));
+    const base = name.replace(/\.[^.]*$/, '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'image';
+    const file = await this.uniquePath(dir, base, ext);
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(file), bytes);
+    return file;
+  }
+
+  private imageReply(reqId: unknown, abs: string, bytes: Uint8Array, ext: string) {
+    const mime = MIME_TYPES['.' + ext] ?? 'application/octet-stream';
+    this.post({
+      type: 'imageReady',
+      reqId,
+      src: this.relSrc(abs),
+      dataUri: `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`,
+    });
+  }
+
+  /** Pasted / dropped image bytes from the webview → file next to the deck. */
+  private async handleSaveImage(msg: any) {
+    const fail = (error: string) => this.post({ type: 'imageReady', reqId: msg.reqId, error });
+    if (!this.deckDir()) return fail('save the deck to disk before adding images');
+    const ext = EXT_FOR_MIME[String(msg.mime)] ??
+      (IMAGE_EXTS.includes(String(msg.name ?? '').split('.').pop()?.toLowerCase() ?? '')
+        ? String(msg.name).split('.').pop()!.toLowerCase()
+        : '');
+    if (!ext) return fail(`unsupported image type ${msg.mime || ''}`.trim());
+    const bytes = Buffer.from(String(msg.data ?? ''), 'base64');
+    if (!bytes.length || bytes.length > MAX_RESOURCE_BYTES) return fail('image is empty or too large');
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+    try {
+      const file = await this.writeImage(bytes, msg.name ? String(msg.name) : `pasted-${stamp}`, ext);
+      this.imageReply(msg.reqId, file, bytes, ext);
+    } catch (err) {
+      fail(`could not save image: ${(err as Error).message}`);
+    }
+  }
+
+  /** "Insert image…": pick a file; copy it next to the deck unless it already lives there. */
+  private async handlePickImage(msg: any) {
+    const dir = this.deckDir();
+    if (!dir) {
+      this.post({ type: 'imageReady', reqId: msg.reqId, error: 'save the deck to disk before adding images' });
+      return;
+    }
+    // a file dropped from the explorer arrives as a uri; otherwise ask
+    const dropped = typeof msg.uri === 'string' ? vscode.Uri.parse(msg.uri) : null;
+    const picked = dropped?.scheme === 'file'
+      ? [dropped]
+      : await vscode.window.showOpenDialog({
+          canSelectMany: false,
+          defaultUri: vscode.Uri.file(dir),
+          filters: { Images: IMAGE_EXTS },
+          openLabel: 'Insert image',
+        });
+    if (!picked?.length) {
+      this.post({ type: 'imageReady', reqId: msg.reqId, cancelled: true });
+      return;
+    }
+    const src = picked[0].fsPath;
+    const ext = path.extname(src).slice(1).toLowerCase();
+    if (!IMAGE_EXTS.includes(ext)) {
+      this.post({ type: 'imageReady', reqId: msg.reqId, error: `unsupported image type .${ext}` });
+      return;
+    }
+    try {
+      const bytes = await vscode.workspace.fs.readFile(picked[0]);
+      if (bytes.length > MAX_RESOURCE_BYTES) throw new Error('image is too large');
+      const rel = path.relative(dir, src);
+      const inside = !rel.startsWith('..') && !path.isAbsolute(rel);
+      const file = inside ? src : await this.writeImage(bytes, path.basename(src), ext);
+      this.imageReply(msg.reqId, file, bytes, ext);
+    } catch (err) {
+      this.post({ type: 'imageReady', reqId: msg.reqId, error: (err as Error).message });
+    }
+  }
+
+  /** Open the source beside the deck with the element's start tag selected. */
+  private async reveal(id: unknown) {
+    const entry = this.map?.byId.get(String(id));
+    if (!entry || entry.outerStart < 0) {
+      this.post({ type: 'toast', text: 'No source location for this element' });
+      return;
+    }
+    const end = entry.startTagEnd >= 0 ? entry.startTagEnd : entry.outerEnd;
+    await vscode.window.showTextDocument(this.document, {
+      viewColumn: vscode.ViewColumn.Beside,
+      selection: new vscode.Range(
+        this.document.positionAt(entry.outerStart),
+        this.document.positionAt(end)
+      ),
+    });
+  }
+
+  // ------------------------------------------------------- AI this element
+
+  private async anthropicClient(): Promise<Anthropic | null> {
+    let key = await this.ctx.secrets.get(API_KEY_SECRET);
+    if (!key && !process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
+      key = await vscode.window.showInputBox({
+        title: 'LiveDeck: Anthropic API key',
+        prompt: 'Needed for "AI this element". Stored in VS Code secret storage.',
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (!key) return null;
+      await this.ctx.secrets.store(API_KEY_SECRET, key.trim());
+    }
+    return key ? new Anthropic({ apiKey: key.trim() }) : new Anthropic();
+  }
+
+  /**
+   * Ask Claude to rewrite one element. The reply replaces that element's
+   * source range — its inner range when the start tag is unchanged, so the
+   * in-place patch path updates just that element in the live DOM.
+   */
+  private async handleAiEdit(msg: any) {
+    const done = (ok: boolean, message: string) =>
+      this.post({ type: 'aiDone', reqId: msg.reqId, ok, message });
+    const map = this.map;
+    const entry = map?.byId.get(String(msg.id));
+    const instruction = String(msg.instruction ?? '').trim();
+    if (!map || !entry || entry.outerStart < 0) return done(false, 'No source location for this element');
+    if (!instruction) return done(false, 'Type an instruction first');
+
+    const elementHtml = map.source.slice(entry.outerStart, entry.outerEnd);
+    const slide = msg.slideId ? map.byId.get(String(msg.slideId)) : undefined;
+    const slideHtml =
+      slide && slide !== entry && slide.outerStart >= 0 && slide.outerStart <= entry.outerStart
+        ? map.source.slice(slide.outerStart, slide.outerEnd)
+        : null;
+    const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(map.source)?.[1]?.trim() ?? '';
+
+    const client = await this.anthropicClient();
+    if (!client) return done(false, 'No API key — cancelled');
+    this.aiAbort?.abort();
+    const abort = new AbortController();
+    this.aiAbort = abort;
+
+    let result;
+    try {
+      result = await runAiEdit(client, { instruction, elementHtml, slideHtml, deckTitle: title }, abort.signal);
+    } catch (err) {
+      if (abort.signal.aborted) return done(false, 'Cancelled');
+      if (err instanceof Anthropic.AuthenticationError) {
+        await this.ctx.secrets.delete(API_KEY_SECRET);
+        return done(false, 'Invalid API key — run the command again to enter a new one');
+      }
+      if (err instanceof Anthropic.RateLimitError) return done(false, 'Rate limited — try again shortly');
+      if (err instanceof Anthropic.APIError) return done(false, `API error ${err.status ?? ''}: ${err.message}`);
+      return done(false, `AI request failed: ${(err as Error).message}`);
+    } finally {
+      if (this.aiAbort === abort) this.aiAbort = null;
+    }
+    if ('message' in result) return done(false, result.message);
+    const invalid = validateReplacement(result.html);
+    if (invalid) return done(false, `Not applied: ${invalid}`);
+
+    // The element may have moved or changed while the model was working.
+    const now = this.map?.byId.get(entry.id);
+    const text = this.document.getText();
+    if (!now || text.slice(now.outerStart, now.outerEnd) !== elementHtml) {
+      return done(false, 'The element changed while AI was working — not applied');
+    }
+    const startTag = text.slice(now.outerStart, now.startTagEnd);
+    const sameStart = now.innerStart >= 0 && result.html.startsWith(startTag) &&
+      result.html.endsWith(`</${now.tag}>`);
+    const [from, to, newText] = sameStart
+      ? [now.innerStart, now.innerEnd, result.html.slice(startTag.length, result.html.length - `</${now.tag}>`.length)]
+      : [now.outerStart, now.outerEnd, result.html];
+    if (text.slice(from, to) === newText) return done(true, 'AI made no changes');
+
+    // Applied like any external edit: onDidChangeTextDocument patches the
+    // element in place (or re-renders when the change crosses its bounds).
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(
+      this.document.uri,
+      new vscode.Range(this.document.positionAt(from), this.document.positionAt(to)),
+      newText
+    );
+    if (!(await vscode.workspace.applyEdit(edit))) return done(false, 'Edit was not applied');
+    done(true, 'AI edit applied — ⌘Z to undo');
   }
 }

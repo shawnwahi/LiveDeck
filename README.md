@@ -11,6 +11,13 @@ Asking an LLM to "fix the wording on slide 4" sometimes rewrites half the file. 
 - **Formatting** — bold / italic / underline / strikethrough (⌘B/⌘I/⌘U), inline `code`, links (⌘K), clear formatting, left/center/right alignment.
 - **Bullets like PowerPoint** — Enter adds a bullet, Enter on an empty bullet exits the list, Tab/Shift+Tab indent/outdent, Alt+↑/↓ reorder, and the toolbar converts paragraphs ⇄ bulleted/numbered lists.
 - **Delete whole elements** — Escape while editing selects the element (PowerPoint-style), or ⌥+click selects anything directly, including images and SVG figures; Backspace/Delete removes it from the file (whole line, no blank residue), ⌘Z brings it back.
+- **Right-click menu** — right-click any element for *AI this element…*, Duplicate, Delete, Move up/down, Reset position/size, Select parent, Insert image, and Reveal in source.
+- **Move things** — drag a selected element (text box, image, rule, figure) to reposition it; Shift locks the axis, arrow keys nudge 1px (Shift: 10px). Written as a CSS `translate` on that one element, so the surrounding layout doesn't shift. ⌘-drag instead *reorders* it among its siblings (cards, columns, bullets, slides), with a drop indicator.
+- **Select several elements** — Shift-click to add/remove elements, or drag across empty slide space to draw a selection band (Shift+drag adds to the selection). Move, nudge, duplicate (⌘D) or delete (⌫) them together; right-click a member for the group menu.
+- **Resize text boxes and images** — handles appear on the selected element and on the text box you're editing; drag an edge to make a box wider or narrower than its column (written as `width`, plus `max-width: none` when widening). Images keep their aspect ratio.
+- **Duplicate** — ⌘D or the menu copies the element's *source text* (never re-serialized DOM), so script-rendered content like charts doesn't leak into the file.
+- **Images** — paste (⌘V), drop a file (hold Shift when dragging from the VS Code explorer), or *Insert image…*. To put an image at a specific spot, click that spot on the slide and press ⌘V (or right-click it → *Paste image here* / *Insert image here…*); dropped images land under the cursor. They're placed as `position: absolute` at that point inside the slide (a static slide gets `position: relative`). With a text box or element selected, the image goes right after it instead. The file is saved next to the deck (`images/` by default) and referenced by a relative path; click an image to select it, then drag or resize it.
+- **AI this element** — right-click → *AI this element…*, type an instruction ("tighten this", "add a citation for this claim", "split into two bullets"). Claude rewrites just that element and the result is written back through the same scoped edit (⌘Z undoes it). It can search the web, so citations point to real sources. Uses your Anthropic API key (asked for once, kept in VS Code secret storage; `ANTHROPIC_API_KEY` also works).
 - **Fits your screen on open** — decks open auto-fitted to the panel (never above 100%), re-fit when you move between monitors, and self-scaling decks get a resize nudge so their own fit logic computes against real dimensions. Manual zoom takes over the moment you touch it.
 - **Theme-matching by construction** — edits are made inside the deck's own DOM, so new text inherits the deck's fonts, colors, and spacing. Formatting writes semantic tags (`<strong>`, `<em>`), and paste is plain-text by default (⌘⇧V pastes rich) so outside styling can't pollute the theme.
 - **Surgical writes** — each edit replaces exactly one element's inner/outer HTML in the source file, with the file's original whitespace and indentation preserved everywhere else.
@@ -58,9 +65,21 @@ Try it on `examples/demo.html`.
 | Alt+↑ / Alt+↓ | Move bullet up / down |
 | Escape (while editing) | Select the element (press again to dismiss) |
 | ⌥+click | Select any element (works on images/SVG too) |
+| Click an image / svg / rule | Select it |
+| Right-click | Element menu (AI, duplicate, delete, move, …) |
+| Shift+click | Add / remove an element from the selection |
+| Drag on empty slide space | Selection band (Shift: add to selection) |
+| Drag a selected element | Move it — and the rest of the selection (Shift: lock axis) |
+| ⌘+drag a selected element | Reorder it among its siblings |
+| Drag a handle | Resize (text box: width / min-height; image: keeps aspect) |
+| Arrow keys / Shift+arrows (element selected) | Nudge 1px / 10px |
+| ⌥↑ / ⌥↓ (element selected) | Move earlier / later among siblings |
+| ⌘D (element selected) | Duplicate |
+| Click a spot, then ⌘V with an image on the clipboard | Paste the image at that spot |
 | Backspace / Delete (element selected) | Delete the element |
 | ⌘Z / ⇧⌘Z | Undo / redo (applies to the file) |
 | ⌘S | Save |
+| ⌘C / ⌘X / ⌘V | Copy / cut / paste text (between text boxes, and to/from other apps) |
 | ⌘⇧V | Paste with original formatting |
 | PgUp / PgDn | Previous / next slide (when not editing) |
 | ⌘+click a link | Open it in your browser |
@@ -73,6 +92,9 @@ Try it on `examples/demo.html`.
 | `livedeck.editDebounceMs` | `400` | Idle time before an edit is written to the file |
 | `livedeck.pastePlainText` | `true` | Paste as plain text to protect the theme |
 | `livedeck.normalizeMarkup` | `true` | `<b>`→`<strong>`, `<i>`→`<em>`, strip empty spans |
+| `livedeck.imageFolder` | `images` | Where pasted/dropped/inserted images are saved, relative to the deck |
+
+Command: **LiveDeck: Set Anthropic API Key** — set or clear the key used by *AI this element*.
 
 ## How it stays safe
 
