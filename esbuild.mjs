@@ -15,7 +15,15 @@ const common = {
 if (tests) {
   await build({
     ...common,
-    entryPoints: ['tests/sourceMap.test.ts', 'tests/resources.test.ts', 'tests/structOps.test.ts', 'tests/aiEdit.test.ts'],
+    entryPoints: [
+      'tests/sourceMap.test.ts',
+      'tests/resources.test.ts',
+      'tests/structOps.test.ts',
+      'tests/aiEdit.test.ts',
+      'tests/fileDocument.test.ts',
+      'tests/selection.test.ts',
+      'tests/serve.test.ts',
+    ],
     outdir: 'out-tests',
     outExtension: { '.js': '.cjs' },
   });
@@ -35,5 +43,14 @@ if (tests) {
     entryPoints: ['src/extension.ts'],
     outfile: 'dist/extension.js',
     external: ['vscode'],
+  });
+
+  // `livedeck` CLI: the editor outside VS Code (serve) and the MCP server
+  await build({
+    ...common,
+    entryPoints: ['src/cli.ts'],
+    outfile: 'dist/livedeck.js',
+    banner: { js: '#!/usr/bin/env node' },
+    define: { LIVEDECK_VERSION: JSON.stringify(version) },
   });
 }

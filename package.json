@@ -24,6 +24,14 @@
     "editor"
   ],
   "main": "./dist/extension.js",
+  "bin": {
+    "livedeck": "dist/livedeck.js"
+  },
+  "files": [
+    "dist/*.js",
+    "media",
+    "README.md"
+  ],
   "activationEvents": [],
   "contributes": {
     "customEditors": [
@@ -120,7 +128,9 @@
     "build": "node esbuild.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node esbuild.mjs --tests && node --test \"out-tests/*.test.cjs\"",
-    "package": "npm run build && vsce package"
+    "package": "npm run build && vsce package",
+    "serve": "npm run build && node dist/livedeck.js serve",
+    "prepare": "node esbuild.mjs"
   },
   "devDependencies": {
     "@types/node": "^18.19.0",

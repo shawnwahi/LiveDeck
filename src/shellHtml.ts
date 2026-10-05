@@ -9,6 +9,8 @@ export interface ShellHtmlOptions {
   media(file: string): string;
   /** CSP source allowed for local resources (webview.cspSource, or 'self') */
   cspSource: string;
+  /** extra stylesheets after shell.css (the standalone host's theme) */
+  styles?: string[];
   /** scripts loaded before shell.js (the standalone host's bridge) */
   preScripts?: string[];
   /** toolbar buttons this host has no use for */
@@ -51,7 +53,7 @@ export function shellHtml(opts: ShellHtmlOptions): string {
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
-<link rel="stylesheet" href="${opts.media('shell.css')}">
+<link rel="stylesheet" href="${opts.media('shell.css')}">${(opts.styles ?? []).map((s) => `\n<link rel="stylesheet" href="${s}">`).join('')}
 </head>
 <body>
 <header id="toolbar">

@@ -9,3 +9,7 @@ tsconfig.json
 **/*.map
 docs/**
 CLAUDE.md
+.gstack/**
+dist/livedeck.js
+claude-plugin/**
+.claude-plugin/**
