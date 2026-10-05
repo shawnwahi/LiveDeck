@@ -1,5 +1,5 @@
 ---
-name: livedeck
+name: edit-selection
 description: Use when the user is working on an HTML slide deck that is open in LiveDeck and refers to part of it as "this", "these", "here", "the selected ...", or "the slide I'm on" — call the LiveDeck get_selection tool to find exactly which elements they mean before editing.
 ---
 
