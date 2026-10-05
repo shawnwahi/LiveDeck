@@ -138,6 +138,11 @@ contiguous replacement:
 | `style` | the element's start tag only (`style` attr rewritten in place) | the element alone — descendants keep ids |
 | `insert` | empty, after the anchor or the container's last child | empty |
 
+Images placed at a point (click-then-paste, drop, *Paste/Insert image
+here*) are appended to the slide — or the nearest positioned container —
+with `position: absolute; left/top` computed in the container's padding-box
+CSS px; a static container first gets a `position: relative` style op.
+
 `applyStructPlan` rebuilds and checks every region element against the
 plan's `origin` (tag + depth), then returns `[oldId, newId]` pairs. The
 webview, which already rearranged its DOM, re-stamps by id lookup — not by

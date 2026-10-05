@@ -754,6 +754,31 @@
     return kids.length ? { anchor: kids[kids.length - 1], where: 'after' } : null;
   }
 
+  /**
+   * Place at a point on a slide: appended to the slide (or the nearest
+   * positioned container) as an absolutely positioned element whose top-left
+   * corner is at (x, y) — iframe viewport coordinates.
+   */
+  function pointPlacement(x, y, target) {
+    const doc = state.doc;
+    const win = doc.defaultView;
+    let t = target && target.nodeType === 1 ? target : doc.elementFromPoint(x, y);
+    if (!t || !doc.body.contains(t)) return null;
+    let c = state.slides.find((sl) => sl.contains(t)) || null;
+    for (let el = t; !c && el && el !== doc.body; el = el.parentElement) {
+      if (!el.getAttribute('data-ld-id') || mediaTarget(el) || el.closest('svg')) continue;
+      const cs = win.getComputedStyle(el);
+      if (cs.position !== 'static' && !cs.display.startsWith('inline')) c = el;
+    }
+    if (!c) { // fall back to the top-level section under the point
+      for (let el = t; el && el.parentElement; el = el.parentElement) {
+        if (el.parentElement === doc.body) { c = el; break; }
+      }
+    }
+    if (!stamped(c) || mediaTarget(c)) return null;
+    return { anchor: c, where: 'append', at: { x, y } };
+  }
+
   function pastePlacement() {
     if (state.editing) {
       const root = state.editing.root;
@@ -762,7 +787,14 @@
       }
       return { anchor: root, where: 'after' };
     }
-    return state.selected ? placementFor(state.selected) : defaultPlacement();
+    if (state.selected) return placementFor(state.selected);
+    // nothing selected: paste where the user last clicked on the slide
+    const p = state.lastPoint;
+    if (p && p.target && p.target.isConnected) {
+      const pl = pointPlacement(p.x, p.y, p.target);
+      if (pl) return pl;
+    }
+    return defaultPlacement();
   }
 
   async function addImages(files, placement) {
@@ -821,11 +853,26 @@
 
     const { anchor, where } = placement;
     if (state.editing) deactivate();
+    let pos = null;
+    if (placement.at && anchor.isConnected) {
+      // CSS px inside the container's padding box (absolute positioning origin)
+      const r = anchor.getBoundingClientRect();
+      const scale = (anchor.offsetWidth && r.width / anchor.offsetWidth) || 1;
+      pos = {
+        left: Math.round((placement.at.x - r.left) / scale - anchor.clientLeft + anchor.scrollLeft),
+        top: Math.round((placement.at.y - r.top) / scale - anchor.clientTop + anchor.scrollTop),
+      };
+      if (state.doc.defaultView.getComputedStyle(anchor).position === 'static') {
+        // make the slide the positioning context, or the coordinates mean nothing
+        anchor.style.position = 'relative';
+        commitStyle(anchor, { position: 'relative' });
+      }
+    }
     enqueue({
       kind: 'struct',
       quiet: true,
       build: () => (stamped(anchor)
-        ? { op: 'insertImage', anchorId: anchor.getAttribute('data-ld-id'), where, src: res.src, width }
+        ? Object.assign({ op: 'insertImage', anchorId: anchor.getAttribute('data-ld-id'), where, src: res.src, width }, pos || {})
         : null),
       onAck: (msg) => {
         if (!msg.insertHtml || !msg.ids || !msg.ids.length) return false;
@@ -859,8 +906,14 @@
     if (m && !m.hidden) m.hidden = true;
   }
 
-  function openMenu(el, clientX, clientY) {
+  function openMenu(el, clientX, clientY, target) {
     const items = [];
+    const here = () => pointPlacement(clientX, clientY, target);
+    const pasteHere = () => {
+      state.lastPoint = { x: clientX, y: clientY, target };
+      if (state.selected && !isMulti()) deselect();
+      clipboardPaste(false);
+    };
     if (el && isMulti()) {
       const els = selectedEls();
       const n = els.length;
@@ -887,10 +940,13 @@
       if (hasInline(el, SIZE_PROPS)) items.push(['Reset size', '', () => resetProps(el, SIZE_PROPS)]);
       items.push('-');
       items.push(['Select parent', '', () => select(parent), !parent]);
-      items.push([isSlide(el) ? 'Insert image in slide…' : 'Insert image after…', '', () => pickImage(placementFor(el)), !ok]);
+      items.push(['Paste image here', '⌘V', pasteHere]);
+      items.push(['Insert image here…', '', () => pickImage(here())]);
+      if (!isSlide(el)) items.push(['Insert image after this', '', () => pickImage(placementFor(el)), !ok]);
       items.push(['Reveal in source', '', () => post({ type: 'reveal', id: el.getAttribute('data-ld-id') }), !ok]);
     } else {
-      items.push(['Insert image…', '', () => pickImage(defaultPlacement())]);
+      items.push(['Paste image here', '⌘V', pasteHere]);
+      items.push(['Insert image here…', '', () => pickImage(here() || defaultPlacement())]);
     }
 
     const m = $('#ctx-menu');
@@ -1494,6 +1550,7 @@
       // suppresses the focus change — pull focus into the deck so the keys
       // that act on a selection (arrows, ⌫, ⌘D) arrive here
       if (!doc.hasFocus()) win.focus();
+      state.lastPoint = { x: e.clientX, y: e.clientY, target: e.target };
       if (e.button !== 0) return; // right-click: the contextmenu handler selects
       if (e.altKey) {
         const target = selectionTarget(e.target);
@@ -1583,12 +1640,12 @@
       }
       e.preventDefault();
       if (isMulti() && selectionContaining(e.target)) {
-        openMenu(state.selected, e.clientX, e.clientY);
+        openMenu(state.selected, e.clientX, e.clientY, e.target);
         return;
       }
       const el = selectionTarget(e.target);
       if (el) select(el); else deselect();
-      openMenu(el, e.clientX, e.clientY);
+      openMenu(el, e.clientX, e.clientY, e.target);
     }, true);
 
     doc.addEventListener('submit', (e) => e.preventDefault(), true);
@@ -1596,17 +1653,17 @@
     doc.addEventListener('drop', (e) => {
       e.preventDefault();
       const files = imageFiles(e.dataTransfer);
+      const under = doc.elementFromPoint(e.clientX, e.clientY) || e.target;
+      const dropAt = () => pointPlacement(e.clientX, e.clientY, under) || defaultPlacement();
       if (files.length) {
-        const at = selectionTarget(doc.elementFromPoint(e.clientX, e.clientY) || e.target);
-        addImages(files, at ? placementFor(at) : defaultPlacement());
+        addImages(files, dropAt());
         return;
       }
       // files dragged from the VS Code explorer arrive as uri-lists (hold Shift)
       const uris = (e.dataTransfer.getData('text/uri-list') || '').split(/\r?\n/)
         .filter((u) => /^file:/.test(u) && IMAGE_NAME.test(u));
       if (uris.length) {
-        const at = selectionTarget(doc.elementFromPoint(e.clientX, e.clientY) || e.target);
-        const placement = at ? placementFor(at) : defaultPlacement();
+        const placement = dropAt();
         uris.forEach((uri) => requestImage({ type: 'pickImage', uri }).then((res) => placeImage(res, placement)));
       }
     }, true);
@@ -2197,7 +2254,7 @@
       }
     } catch (err) { /* permission denied or unsupported */ }
     // 3. the extension host's clipboard (text)
-    if (!state.editing) return;
+    if (!state.editing) { toast('No image on the clipboard'); return; }
     const res = await hostClipboard({ type: 'clipboardRead' });
     if (res && res.text) insertClipboard(res.text, '', false);
   }

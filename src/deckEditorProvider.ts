@@ -620,11 +620,17 @@ class DeckSession {
         const width = Math.round(Number(msg.width));
         if (!src || /^[a-z][a-z0-9+.-]*:/i.test(src)) return this.failStruct('bad image path');
         const w = Number.isFinite(width) && width > 0 ? ` width="${width}"` : '';
+        // placed at a point: absolutely positioned inside its container
+        const left = Math.round(Number(msg.left));
+        const top = Math.round(Number(msg.top));
+        const at = Number.isFinite(left) && Number.isFinite(top)
+          ? ` style="position: absolute; left: ${left}px; top: ${top}px"`
+          : '';
         op = {
           op: 'insert',
           anchorId: String(msg.anchorId),
           where: msg.where === 'append' ? 'append' : 'after',
-          html: `<img src="${attrEscape(src)}" alt=""${w}>`,
+          html: `<img src="${attrEscape(src)}" alt=""${w}${at}>`,
         };
         break;
       }
