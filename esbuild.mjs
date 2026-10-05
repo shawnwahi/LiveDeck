@@ -1,4 +1,5 @@
 import { build } from 'esbuild';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const tests = process.argv.includes('--tests');
 
@@ -19,6 +20,16 @@ if (tests) {
     outExtension: { '.js': '.cjs' },
   });
 } else {
+  // Keep the version in the "Open with LiveDeck" title in sync with package.json
+  // (contributed command titles can't be templated).
+  const pkgText = readFileSync('package.json', 'utf8');
+  const { version } = JSON.parse(pkgText);
+  const synced = pkgText.replace(
+    /"title": "Open with LiveDeck[^"]*"/,
+    `"title": "Open with LiveDeck v${version}"`
+  );
+  if (synced !== pkgText) writeFileSync('package.json', synced);
+
   await build({
     ...common,
     entryPoints: ['src/extension.ts'],
