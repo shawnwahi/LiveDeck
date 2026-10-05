@@ -216,6 +216,7 @@ export class DeckEditorProvider implements vscode.CustomTextEditorProvider {
       <div class="h" data-dir="se" title="Drag to resize"></div>
     </div>
     <div id="drop-ind" hidden></div>
+    <div id="marquee" hidden></div>
   </div>
 </div>
 <div id="ctx-menu" role="menu" hidden></div>

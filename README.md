@@ -13,6 +13,7 @@ Asking an LLM to "fix the wording on slide 4" sometimes rewrites half the file. 
 - **Delete whole elements** — Escape while editing selects the element (PowerPoint-style), or ⌥+click selects anything directly, including images and SVG figures; Backspace/Delete removes it from the file (whole line, no blank residue), ⌘Z brings it back.
 - **Right-click menu** — right-click any element for *AI this element…*, Duplicate, Delete, Move up/down, Reset position/size, Select parent, Insert image, and Reveal in source.
 - **Move things** — drag a selected element (text box, image, rule, figure) to reposition it; Shift locks the axis, arrow keys nudge 1px (Shift: 10px). Written as a CSS `translate` on that one element, so the surrounding layout doesn't shift. ⌘-drag instead *reorders* it among its siblings (cards, columns, bullets, slides), with a drop indicator.
+- **Select several elements** — Shift-click to add/remove elements, or drag across empty slide space to draw a selection band (Shift+drag adds to the selection). Move, nudge, duplicate (⌘D) or delete (⌫) them together; right-click a member for the group menu.
 - **Resize text boxes and images** — handles appear on the selected element and on the text box you're editing; drag an edge to make a box wider or narrower than its column (written as `width`, plus `max-width: none` when widening). Images keep their aspect ratio.
 - **Duplicate** — ⌘D or the menu copies the element's *source text* (never re-serialized DOM), so script-rendered content like charts doesn't leak into the file.
 - **Images** — paste (⌘V), drop a file (hold Shift when dragging from the VS Code explorer), or *Insert image…*. The file is saved next to the deck (`images/` by default) and referenced by a relative path; click an image to select it, then drag or resize it.
@@ -66,7 +67,9 @@ Try it on `examples/demo.html`.
 | ⌥+click | Select any element (works on images/SVG too) |
 | Click an image / svg / rule | Select it |
 | Right-click | Element menu (AI, duplicate, delete, move, …) |
-| Drag a selected element | Move it (Shift: lock axis) |
+| Shift+click | Add / remove an element from the selection |
+| Drag on empty slide space | Selection band (Shift: add to selection) |
+| Drag a selected element | Move it — and the rest of the selection (Shift: lock axis) |
 | ⌘+drag a selected element | Reorder it among its siblings |
 | Drag a handle | Resize (text box: width / min-height; image: keeps aspect) |
 | Arrow keys / Shift+arrows (element selected) | Nudge 1px / 10px |

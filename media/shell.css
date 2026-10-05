@@ -296,3 +296,10 @@ button#zoom-ind { color: var(--vscode-descriptionForeground); }
   cursor: pointer;
 }
 #ai-run:hover { background: var(--vscode-button-hoverBackground); }
+
+#marquee[hidden] { display: none; }
+#marquee {
+  position: absolute;
+  border: 1px solid rgba(64,156,255,.9);
+  background: rgba(64,156,255,.12);
+}

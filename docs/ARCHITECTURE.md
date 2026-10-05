@@ -153,7 +153,15 @@ layout. Pixel deltas are converted to the element's coordinate space
 `data-ld-orig-style` twin (inlined `url()`s), the ack updates it so later
 outer edits don't restore a stale style.
 
-Resize handles and the reorder drop indicator live in the shell's
+**Multi-selection**: `state.selected` is the primary, `state.extra` the
+rest; the set is always disjoint subtrees (adding a nested element replaces
+its ancestor/descendant). Group actions are just the single-element ops
+queued once per element — each is its own scoped write (and undo step).
+The selection band picks the outermost stamped elements fully inside it,
+never the container the drag started on, and descends through a lone
+wrapper to its items.
+
+Resize handles, the selection band and the reorder drop indicator live in the shell's
 `#overlay`, never in the deck DOM (an extra node there would shift DFS order).
 
 ### AI this element (`aiEdit.ts`)

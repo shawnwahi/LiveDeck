@@ -32,6 +32,9 @@
     pasteRichOnce: false,
     hoverEl: null,
     firstRender: true,
+    extra: [], // additional selected elements (shift-click / marquee); state.selected is the primary
+    marquee: null, // pending/active rubber-band selection
+    nudged: new Set(),
     drag: null, // pending/active move or reorder drag of an element
     resize: null, // active resize-handle drag
     nudgeTimer: null,
@@ -395,24 +398,98 @@
   }
 
   function deselect() {
-    if (!state.selected) return;
-    const el = state.selected;
+    if (!state.selected && !state.extra.length) return;
+    for (const el of [state.selected, ...state.extra]) {
+      if (!el) continue;
+      el.classList.remove('ld-selected');
+      if (el.getAttribute('class') === '') el.removeAttribute('class');
+    }
     state.selected = null;
-    el.classList.remove('ld-selected');
-    if (el.getAttribute('class') === '') el.removeAttribute('class');
+    state.extra = [];
     updateCrumb(state.editing ? state.editing.root : null);
     refreshOverlay();
   }
 
+  /** Every selected element, primary first. */
+  function selectedEls() {
+    return [state.selected, ...state.extra].filter((el) => el && el.isConnected);
+  }
+
+  function isMulti() { return selectedEls().length > 1; }
+
+  /** The selected element containing `node`, if any. */
+  function selectionContaining(node) {
+    return selectedEls().find((el) => el === node || el.contains(node)) || null;
+  }
+
+  function updateMultiCrumb() {
+    const n = selectedEls().length;
+    if (n < 2) { if (state.selected) select(state.selected); return; }
+    const crumb = $('#crumb');
+    crumb.textContent = `${n} elements selected  —  drag to move · ⌘D duplicate · ⌫ delete`;
+    crumb.title = 'shift-click to add or remove · drag to move · arrows nudge · ⌘D duplicate · ⌫ delete';
+    refreshOverlay();
+  }
+
+  function unselectOne(el) {
+    el.classList.remove('ld-selected');
+    if (el.getAttribute('class') === '') el.removeAttribute('class');
+    if (el === state.selected) state.selected = state.extra.shift() || null;
+    else state.extra = state.extra.filter((x) => x !== el);
+  }
+
+  /** Shift-click: add or remove one element. Nested picks replace their
+   *  ancestor/descendant, so the selection is always disjoint subtrees. */
+  function toggleSelect(el) {
+    if (state.editing) {
+      const root = state.editing.root;
+      deactivate();
+      if (!state.selected && root.isConnected && root !== el && !root.contains(el) && !el.contains(root)) {
+        select(root);
+      }
+    }
+    if (selectedEls().includes(el)) {
+      unselectOne(el);
+    } else {
+      for (const s of selectedEls()) if (s.contains(el) || el.contains(s)) unselectOne(s);
+      if (!state.selected) { select(el); return; }
+      state.extra.push(el);
+      el.classList.add('ld-selected');
+    }
+    if (!state.selected) { deselect(); return; }
+    updateMultiCrumb();
+  }
+
+  /** Select a set of elements at once (marquee, multi-duplicate). */
+  function selectMany(els, additive) {
+    const list = additive ? selectedEls().concat(els) : els.slice();
+    const disjoint = list.filter((el, i) => list.indexOf(el) === i
+      && !list.some((o) => o !== el && o.contains(el)));
+    if (!disjoint.length) { if (!additive) deselect(); return; }
+    select(disjoint[0]);
+    for (const el of disjoint.slice(1)) { state.extra.push(el); el.classList.add('ld-selected'); }
+    updateMultiCrumb();
+  }
+
   function deleteSelected() {
-    const el = state.selected;
-    if (!el || !el.isConnected || !el.getAttribute('data-ld-id')) { deselect(); return; }
-    const oldId = el.getAttribute('data-ld-id');
-    const tag = el.tagName.toLowerCase();
+    const els = selectedEls().filter((el) => el.getAttribute('data-ld-id'));
     deselect();
-    el.remove();
-    enqueue({ kind: 'outer', oldId, els: [] });
-    toast('Deleted <' + tag + '> — ⌘Z to undo');
+    if (!els.length) return;
+    for (const el of els) {
+      const oldId = el.getAttribute('data-ld-id');
+      el.remove();
+      enqueue({ kind: 'outer', oldId, els: [] });
+    }
+    toast((els.length > 1 ? `Deleted ${els.length} elements` : 'Deleted <' + els[0].tagName.toLowerCase() + '>') + ' — ⌘Z to undo');
+  }
+
+  function duplicateSelection() {
+    const els = selectedEls();
+    if (els.length < 2) { if (els[0]) duplicateElement(els[0]); return; }
+    deselect();
+    const clones = els.map((el) => duplicateElement(el, true)).filter(Boolean);
+    selectMany(clones, false);
+    toast(`Duplicated ${clones.length} elements — ⌘Z to undo`);
   }
 
   /** Element a ⌥-click selects: the text root if there is one, else the
@@ -538,13 +615,18 @@
     if (!t) { toast('This element has a non-px CSS translate; can’t move it'); return; }
     el.style.translate = `${Math.round(t.x + dx)}px ${Math.round(t.y + dy)}px`;
     refreshOverlay();
+    state.nudged.add(el);
     clearTimeout(state.nudgeTimer);
-    state.nudgeTimer = setTimeout(() => { if (el.isConnected) commitTranslate(el); }, 500);
+    state.nudgeTimer = setTimeout(() => {
+      const els = Array.from(state.nudged);
+      state.nudged.clear();
+      els.forEach((n) => { if (n.isConnected) commitTranslate(n); });
+    }, 500);
   }
 
-  function duplicateElement(el) {
-    if (!stamped(el)) return;
-    deselect();
+  function duplicateElement(el, quiet) {
+    if (!stamped(el)) return null;
+    if (!quiet) deselect();
     const clone = el.cloneNode(true);
     const cloneStamped = [clone, ...clone.querySelectorAll('[data-ld-id]')]
       .filter((n) => n.hasAttribute('data-ld-id'));
@@ -575,8 +657,11 @@
         detectSlides();
       },
     });
-    select(clone);
-    toast('Duplicated <' + el.tagName.toLowerCase() + '> — ⌘Z to undo');
+    if (!quiet) {
+      select(clone);
+      toast('Duplicated <' + el.tagName.toLowerCase() + '> — ⌘Z to undo');
+    }
+    return clone;
   }
 
   function moveElement(el, target, before) {
@@ -776,7 +861,17 @@
 
   function openMenu(el, clientX, clientY) {
     const items = [];
-    if (el) {
+    if (el && isMulti()) {
+      const els = selectedEls();
+      const n = els.length;
+      items.push([`Duplicate ${n} elements`, '⌘D', duplicateSelection]);
+      items.push([`Delete ${n} elements`, '⌫', deleteSelected]);
+      if (els.some((x) => hasInline(x, ['translate']))) {
+        items.push(['Reset positions', '', () => els.forEach((x) => { if (hasInline(x, ['translate'])) resetProps(x, ['translate']); })]);
+      }
+      items.push('-');
+      items.push(['Clear selection', 'Esc', deselect]);
+    } else if (el) {
       const prev = stampedSibling(el, -1);
       const next = stampedSibling(el, 1);
       const parent = stampedParent(el);
@@ -832,7 +927,7 @@
     const box = $('#sel-box');
     if (!box) return;
     const el = state.doc && overlayTarget();
-    if (!el || (state.drag && state.drag.moved && state.drag.reorder)) { box.hidden = true; return; }
+    if (!el || state.extra.length || (state.drag && state.drag.moved && state.drag.reorder)) { box.hidden = true; return; }
     const r = el.getBoundingClientRect();
     if (!r.width && !r.height) { box.hidden = true; return; }
     const z = state.zoom;
@@ -923,6 +1018,7 @@
 
   function startDrag(d) {
     if (state.hoverEl) { state.hoverEl.classList.remove('ld-hover'); state.hoverEl = null; }
+    if (d.reorder && isMulti()) { d.abort = true; toast('⌘-drag reorders one element at a time'); return; }
     if (d.reorder) {
       const parent = d.el.parentElement;
       d.sibs = parent ? Array.from(parent.children).filter((s) => s !== d.el && stamped(s)) : [];
@@ -932,11 +1028,15 @@
         || (/grid/.test(cs.display) && cs.gridTemplateColumns.trim().split(/\s+/).length > 1);
       return;
     }
-    d.t0 = currentTranslate(d.el);
-    if (!d.t0) { d.abort = true; toast('This element has a non-px CSS translate; can’t move it'); return; }
-    d.scale = deckScale(d.el);
-    d.orig = d.el.style.translate;
-    d.el.classList.add('ld-dragging');
+    // free move: the whole selection when the pressed element is part of it
+    const els = selectionContaining(d.el) ? selectedEls() : [d.el];
+    d.items = [];
+    for (const el of els) {
+      const t0 = currentTranslate(el);
+      if (!t0) { d.abort = true; toast('An element has a non-px CSS translate; can’t move it'); return; }
+      d.items.push({ el, t0, scale: deckScale(el), orig: el.style.translate });
+    }
+    d.items.forEach((it) => it.el.classList.add('ld-dragging'));
   }
 
   function updateReorder(d, e) {
@@ -988,7 +1088,9 @@
       let mx = dx;
       let my = dy;
       if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) my = 0; else mx = 0; } // axis lock
-      d.el.style.translate = `${Math.round(d.t0.x + mx / d.scale)}px ${Math.round(d.t0.y + my / d.scale)}px`;
+      for (const it of d.items) {
+        it.el.style.translate = `${Math.round(it.t0.x + mx / it.scale)}px ${Math.round(it.t0.y + my / it.scale)}px`;
+      }
     }
     refreshOverlay();
   }
@@ -998,8 +1100,10 @@
     state.drag = null;
     if (!d) return;
     $('#drop-ind').hidden = true;
-    d.el.classList.remove('ld-dragging');
-    if (d.el.getAttribute('class') === '') d.el.removeAttribute('class');
+    for (const it of d.items || [{ el: d.el }]) {
+      it.el.classList.remove('ld-dragging');
+      if (it.el.getAttribute('class') === '') it.el.removeAttribute('class');
+    }
     if (!d.moved) {
       if (commit && !d.keep) {
         // a plain click on an already-selected element: drop into text editing
@@ -1014,14 +1118,72 @@
       refreshOverlay();
       return;
     }
-    if (!commit) {
-      if (d.orig) d.el.style.translate = d.orig; else d.el.style.removeProperty('translate');
-      if (d.el.getAttribute('style') === '') d.el.removeAttribute('style');
-      refreshOverlay();
-      return;
+    for (const it of d.items) {
+      if (!commit) {
+        if (it.orig) it.el.style.translate = it.orig; else it.el.style.removeProperty('translate');
+        if (it.el.getAttribute('style') === '') it.el.removeAttribute('style');
+      } else if (it.el.style.translate !== it.orig) {
+        commitTranslate(it.el);
+      }
     }
-    if (d.el.style.translate !== d.orig) commitTranslate(d.el);
     refreshOverlay();
+  }
+
+  // rubber-band (marquee) selection -------------------------------------------
+
+  function beginMarquee(e) {
+    state.marquee = { x0: e.clientX, y0: e.clientY, moved: false, additive: e.shiftKey, start: e.target };
+    try {
+      if (state.lastPointerId != null && e.target.setPointerCapture) e.target.setPointerCapture(state.lastPointerId);
+    } catch (err) { /* best-effort */ }
+  }
+
+  function marqueeRect(m, e) {
+    return {
+      left: Math.min(m.x0, e.clientX), top: Math.min(m.y0, e.clientY),
+      right: Math.max(m.x0, e.clientX), bottom: Math.max(m.y0, e.clientY),
+    };
+  }
+
+  function onMarqueeMove(e) {
+    const m = state.marquee;
+    if (!m) return;
+    if (!(e.buttons & 1)) { endMarquee(null); return; }
+    if (!m.moved && Math.hypot(e.clientX - m.x0, e.clientY - m.y0) < 4) return;
+    m.moved = true;
+    e.preventDefault();
+    const r = marqueeRect(m, e);
+    const z = state.zoom;
+    Object.assign($('#marquee').style, {
+      left: r.left * z + 'px', top: r.top * z + 'px',
+      width: (r.right - r.left) * z + 'px', height: (r.bottom - r.top) * z + 'px',
+    });
+    $('#marquee').hidden = false;
+  }
+
+  /** Select the outermost source elements lying fully inside the band —
+   *  never the container the drag started on (the slide background). */
+  function endMarquee(e) {
+    const m = state.marquee;
+    state.marquee = null;
+    $('#marquee').hidden = true;
+    if (!m || !m.moved || !e) return;
+    const r = marqueeRect(m, e);
+    const hits = Array.from(state.doc.querySelectorAll('[data-ld-id]')).filter((el) => {
+      if (el.contains(m.start)) return false;
+      if (el.parentElement && el.parentElement.closest('svg')) return false;
+      const b = el.getBoundingClientRect();
+      return b.width > 0 && b.height > 0 && b.left >= r.left && b.right <= r.right
+        && b.top >= r.top && b.bottom <= r.bottom;
+    });
+    let outer = hits.filter((el) => !hits.some((o) => o !== el && o.contains(el)));
+    // a lone invisible wrapper (e.g. the row holding three cards): pick its items
+    while (outer.length === 1) {
+      const kids = Array.from(outer[0].children).filter((k) => k.getAttribute('data-ld-id'));
+      if (kids.length < 2 || !kids.every((k) => hits.includes(k))) break;
+      outer = kids;
+    }
+    selectMany(outer, m.additive);
   }
 
   // Structural op helpers ---------------------------------------------------
@@ -1239,6 +1401,9 @@
     state.selected = null;
     state.drag = null;
     state.resize = null;
+    state.extra = [];
+    state.marquee = null;
+    state.nudged.clear();
     closeMenu();
     if (ai.reqId) closeAi();
     state.dirty.clear();
@@ -1325,6 +1490,10 @@
 
     doc.addEventListener('mousedown', (e) => {
       closeMenu();
+      // several branches below preventDefault (selection, drags), which also
+      // suppresses the focus change — pull focus into the deck so the keys
+      // that act on a selection (arrows, ⌫, ⌘D) arrive here
+      if (!doc.hasFocus()) win.focus();
       if (e.button !== 0) return; // right-click: the contextmenu handler selects
       if (e.altKey) {
         const target = selectionTarget(e.target);
@@ -1335,10 +1504,25 @@
           return;
         }
       }
-      // press on the selected element: drag moves it; a plain click edits text
-      if (state.selected && state.selected.contains(e.target)) {
+      // shift-click: add/remove elements (inside the text being edited it
+      // extends the text selection as usual)
+      if (e.shiftKey && !(state.editing && state.editing.root.contains(e.target))) {
+        const target = selectionTarget(e.target);
+        if (target && !isSlide(target)) {
+          e.preventDefault();
+          toggleSelect(target);
+          return;
+        }
         e.preventDefault();
-        beginDragPending(state.selected, e, !!mediaTarget(state.selected));
+        beginMarquee(e); // shift-drag on empty space adds a band selection
+        return;
+      }
+      // press on a selected element: drag moves it (and the rest of the
+      // selection); a plain click on a lone selected text box edits it
+      const hit = selectionContaining(e.target);
+      if (hit) {
+        e.preventDefault();
+        beginDragPending(hit, e, !!mediaTarget(hit) || isMulti());
         return;
       }
       // images, svg figures, rules: select (and allow drag) on press
@@ -1353,8 +1537,11 @@
       const root = findRoot(e.target);
       if (root) {
         if (!state.editing || state.editing.root !== root) activate(root, e);
-      } else if (state.editing && !state.editing.root.contains(e.target)) {
-        deactivate();
+      } else if (!(state.editing && state.editing.root.contains(e.target))) {
+        if (state.editing) deactivate();
+        // empty space: drag a selection band
+        e.preventDefault();
+        beginMarquee(e);
       }
     }, true);
 
@@ -1381,8 +1568,11 @@
       }
     }, true);
 
-    doc.addEventListener('mousemove', onDragMove, true);
-    doc.addEventListener('mouseup', () => { if (state.drag) endDrag(true); }, true);
+    doc.addEventListener('mousemove', (e) => { onDragMove(e); onMarqueeMove(e); }, true);
+    doc.addEventListener('mouseup', (e) => {
+      if (state.drag) endDrag(true);
+      if (state.marquee) endMarquee(e);
+    }, true);
     doc.addEventListener('dragstart', (e) => { if (state.drag || mediaTarget(e.target)) e.preventDefault(); }, true);
 
     doc.addEventListener('contextmenu', (e) => {
@@ -1392,6 +1582,10 @@
         if (sel && !sel.isCollapsed) return;
       }
       e.preventDefault();
+      if (isMulti() && selectionContaining(e.target)) {
+        openMenu(state.selected, e.clientX, e.clientY);
+        return;
+      }
       const el = selectionTarget(e.target);
       if (el) select(el); else deselect();
       openMenu(el, e.clientX, e.clientY);
@@ -1418,7 +1612,7 @@
     }, true);
 
     doc.addEventListener('mouseover', (e) => {
-      if (state.drag && state.drag.moved) return;
+      if ((state.drag && state.drag.moved) || state.marquee) return;
       // with ⌥ held, preview what a select-click would grab (incl. images)
       const root = e.altKey ? selectionTarget(e.target) : findRoot(e.target);
       if (state.hoverEl && state.hoverEl !== root) {
@@ -1514,6 +1708,9 @@
     if (state.drag && e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation(); endDrag(false); return;
     }
+    if (state.marquee && e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation(); endMarquee(null); return;
+    }
     if (state.resize && e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation(); endResize(true); return;
     }
@@ -1525,9 +1722,9 @@
       const el = state.selected;
       const arrows = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
       if (mod && e.key.toLowerCase() === 'd') {
-        e.preventDefault(); e.stopPropagation(); duplicateElement(el); return;
+        e.preventDefault(); e.stopPropagation(); duplicateSelection(); return;
       }
-      if (e.altKey && arrows[e.key]) {
+      if (e.altKey && arrows[e.key] && !isMulti()) {
         e.preventDefault(); e.stopPropagation();
         moveStep(el, e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 1);
         return;
@@ -1536,7 +1733,7 @@
         // PowerPoint-style nudge: 1px, Shift for 10px
         e.preventDefault(); e.stopPropagation();
         const step = e.shiftKey ? 10 : 1;
-        nudge(el, arrows[e.key][0] * step, arrows[e.key][1] * step);
+        selectedEls().forEach((x) => nudge(x, arrows[e.key][0] * step, arrows[e.key][1] * step));
         return;
       }
       if (e.key === 'Backspace' || e.key === 'Delete') {
