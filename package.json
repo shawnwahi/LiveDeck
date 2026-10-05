@@ -2,7 +2,7 @@
   "name": "livedeck",
   "displayName": "LiveDeck — Inline HTML Deck Editor",
   "description": "Edit HTML slide decks in place, PowerPoint-style. Click into any text, type, format, add bullets — every change is written back to the HTML file as a minimal, surgical edit.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "celltype",
   "license": "MIT",
   "repository": {
@@ -49,6 +49,11 @@
         "title": "Reopen as HTML Source",
         "category": "LiveDeck",
         "icon": "$(code)"
+      },
+      {
+        "command": "livedeck.setApiKey",
+        "title": "Set Anthropic API Key (AI this element)",
+        "category": "LiveDeck"
       }
     ],
     "menus": {
@@ -102,6 +107,11 @@
           "type": "boolean",
           "default": true,
           "description": "Normalize editor output when writing back: <b>→<strong>, <i>→<em>, strip empty spans and font tags."
+        },
+        "livedeck.imageFolder": {
+          "type": "string",
+          "default": "images",
+          "description": "Folder (relative to the deck) where pasted, dropped and inserted images are saved."
         }
       }
     }
@@ -109,7 +119,7 @@
   "scripts": {
     "build": "node esbuild.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node esbuild.mjs --tests && node --test out-tests/",
+    "test": "node esbuild.mjs --tests && node --test \"out-tests/*.test.cjs\"",
     "package": "npm run build && vsce package"
   },
   "devDependencies": {
@@ -120,6 +130,7 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "parse5": "^7.1.2"
   }
 }

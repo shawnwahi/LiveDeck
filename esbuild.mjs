@@ -14,7 +14,7 @@ const common = {
 if (tests) {
   await build({
     ...common,
-    entryPoints: ['tests/sourceMap.test.ts', 'tests/resources.test.ts'],
+    entryPoints: ['tests/sourceMap.test.ts', 'tests/resources.test.ts', 'tests/structOps.test.ts', 'tests/aiEdit.test.ts'],
     outdir: 'out-tests',
     outExtension: { '.js': '.cjs' },
   });

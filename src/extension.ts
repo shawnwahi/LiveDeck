@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DeckEditorProvider } from './deckEditorProvider';
+import { DeckEditorProvider, API_KEY_SECRET } from './deckEditorProvider';
 
 function targetUri(uri?: vscode.Uri): vscode.Uri | undefined {
   if (uri) return uri;
@@ -25,6 +25,18 @@ export function activate(ctx: vscode.ExtensionContext) {
         target,
         DeckEditorProvider.viewType
       );
+    }),
+    vscode.commands.registerCommand('livedeck.setApiKey', async () => {
+      const key = await vscode.window.showInputBox({
+        title: 'LiveDeck: Anthropic API key',
+        prompt: 'Used by "AI this element". Leave empty to clear the stored key.',
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (key === undefined) return;
+      if (key.trim()) await ctx.secrets.store(API_KEY_SECRET, key.trim());
+      else await ctx.secrets.delete(API_KEY_SECRET);
+      void vscode.window.showInformationMessage(key.trim() ? 'LiveDeck: API key saved.' : 'LiveDeck: API key cleared.');
     }),
     vscode.commands.registerCommand('livedeck.openSource', async (uri?: vscode.Uri) => {
       const target = targetUri(uri);

@@ -105,6 +105,12 @@ Editable **roots** are the smallest sensible text containers:
 | `p`, `div`/`section` leaf, `blockquote` | the element | split into two elements (outer op) |
 | `h1–h6`, `td`, `th`, `caption`, … | the element | `<br>` line break (inner edit) |
 
+Decorations: underline / strikethrough from CSS (links!) can't be removed
+by `execCommand` — a text-decoration can't be cancelled from a descendant.
+`toggleDecoration` finds the element that draws it and toggles
+`text-decoration-line` on that element (inner edit if it's inside the root,
+a `style` struct op if it's the root or wraps it).
+
 Never editable: anything inside `svg`, `canvas`, `script`, `style`, `iframe`,
 form controls — and any element without a `data-ld-id` stamp (i.e. created at
 runtime by deck scripts, not present in the source).
@@ -116,6 +122,50 @@ a selection removes the element locally and sends an outer op with empty
 `parts`; the provider maps that to `deletionRange` (consuming the element's
 own line so no blank line is left) and the region rebuild yields zero fresh
 ids. Undo restores it through the in-place patch path.
+
+### Structural ops (`structOps.ts`)
+
+Duplicate, reorder (menu / ⌥↑↓ / ⌘-drag), reposition and resize (inline
+`translate` / `width` …), and image insertion don't serialize DOM at all.
+The webview sends `{type:'struct', op, …}`; the host plans the new text from
+**slices of the source** (plus generated `<img>` markup for inserts) as one
+contiguous replacement:
+
+| op | replaced range | DFS region |
+| --- | --- | --- |
+| `duplicate` | empty, at the element's end (copy of its source on the next line) | empty, after its subtree |
+| `move` | from the first to the last sibling of the run; separators stay put | the run's subtrees |
+| `style` | the element's start tag only (`style` attr rewritten in place) | the element alone — descendants keep ids |
+| `insert` | empty, after the anchor or the container's last child | empty |
+
+`applyStructPlan` rebuilds and checks every region element against the
+plan's `origin` (tag + depth), then returns `[oldId, newId]` pairs. The
+webview, which already rearranged its DOM, re-stamps by id lookup — not by
+DFS re-count — so unstamped, script-generated descendants (a chart drawn
+into a moved card) can't cause a mismatch. A duplicate's clone has its
+stamps removed until the ack arrives, so it can never address the
+original's range. Any failure → full re-render (`failStruct`).
+
+Moves and resizes are written as inline `translate` / `width` / `max-width`
+/ `min-height` on the one element: the element keeps its place in the
+layout. Pixel deltas are converted to the element's coordinate space
+(LiveDeck zoom × the deck's own scale of the parent). If the element has a
+`data-ld-orig-style` twin (inlined `url()`s), the ack updates it so later
+outer edits don't restore a stale style.
+
+Resize handles and the reorder drop indicator live in the shell's
+`#overlay`, never in the deck DOM (an extra node there would shift DFS order).
+
+### AI this element (`aiEdit.ts`)
+
+The host sends the element's exact source, its slide's source (context),
+and the instruction to `claude-opus-5-5` (web search enabled so citations
+are real; server-side refusal fallback on). The reply's fenced HTML is
+validated, the element's source is re-checked to be unchanged since the
+request, and the replacement is applied as a normal `WorkspaceEdit` — the
+inner range when the start tag is unchanged — so the existing
+external-change path (`tryPatch`) patches that element in place. One edit,
+one ⌘Z.
 
 **Zoom**: `autoZoom` (default on, off once the user touches zoom controls,
 persisted) shrinks to fit the panel width, capped at 100%, re-running on
