@@ -21,6 +21,7 @@
     dirty: new Set(), // roots with unflushed DOM changes
     opQueue: [],
     pending: null, // op awaiting ack
+    staleIds: new Set(), // ids retired by an ack whose DOM could not be re-stamped
     debounceTimer: null,
     slides: [],
     slideIdx: 0,
@@ -191,6 +192,7 @@
       if (html === root.__ldLastSent) { state.dirty.delete(root); pump(); return; }
       root.__ldLastSent = html;
       op.regionEls = [root];
+      op.sentIds = [root, ...root.querySelectorAll('*')].map((e) => e.getAttribute('data-ld-id'));
       op.payload = {
         type: 'edit', mode: 'inner',
         id: root.getAttribute('data-ld-id'),
@@ -207,12 +209,17 @@
         return;
       }
       op.payload = Object.assign({ type: 'struct', mapVersion: state.mapVersion }, p);
-    } else { // outer: replace one old element with op.els
+    } else { // outer: replace one old element with op.els (none: delete op.removed)
       if (!op.els.every((e) => e.isConnected)) { requestReload('detached region'); return; }
+      // A delete reads its id now: an edit acked since it was queued may have re-stamped it.
+      const id = op.removed ? op.removed.getAttribute('data-ld-id') : op.oldId;
+      // Retired id: the element sat inside a root that is being re-flushed
+      // from the DOM, and that flush already leaves it out.
+      if (op.removed && state.staleIds.has(id)) { pump(); return; }
       op.regionEls = op.els;
       op.payload = {
         type: 'edit', mode: 'outer',
-        id: op.oldId,
+        id,
         parts: op.els.map((e) => serializeClean(e, false)),
         mapVersion: state.mapVersion,
       };
@@ -228,21 +235,26 @@
     state.mapVersion = msg.mapVersion;
     publishSelection(); // ids and source moved; runs after this ack settles
     if (op) {
+      // Detached roots count too: an element deleted while its edit was in
+      // flight keeps its subtree, and the queued delete needs its fresh id.
       const els = [];
       for (const rootEl of op.regionEls) {
-        if (rootEl.isConnected) {
-          els.push(rootEl, ...rootEl.querySelectorAll('*'));
-        }
+        els.push(rootEl, ...rootEl.querySelectorAll('*'));
       }
       if (els.length === msg.ids.length) {
         els.forEach((el, i) => el.setAttribute('data-ld-id', msg.ids[i]));
-      } else if (op.regionEls.length === 1 && op.regionEls[0].isConnected && msg.ids.length >= 1) {
-        // Structure moved under us mid-flight (fast typing). Stamp the root —
-        // it is always first in DFS order — and re-flush to converge.
+      } else if (op.regionEls.length === 1 && msg.ids.length >= 1) {
+        // Structure moved under us mid-flight (fast typing, or a child was
+        // deleted). Stamp the root — it is always first in DFS order — and,
+        // if it is still in the deck, re-flush to converge. Its old
+        // descendant ids are gone host-side.
         const root = op.regionEls[0];
         root.setAttribute('data-ld-id', msg.ids[0]);
-        root.__ldLastSent = undefined;
-        state.dirty.add(root);
+        (op.sentIds || []).slice(1).forEach((id) => { if (id) state.staleIds.add(id); });
+        if (root.isConnected) {
+          root.__ldLastSent = undefined;
+          state.dirty.add(root);
+        }
       } else {
         requestReload('region mismatch after ack');
         return;
@@ -480,7 +492,7 @@
     for (const el of els) {
       const oldId = el.getAttribute('data-ld-id');
       el.remove();
-      enqueue({ kind: 'outer', oldId, els: [] });
+      enqueue({ kind: 'outer', oldId, removed: el, els: [] });
     }
     toast((els.length > 1 ? `Deleted ${els.length} elements` : 'Deleted <' + els[0].tagName.toLowerCase() + '>') + ' — ⌘Z to undo');
   }
