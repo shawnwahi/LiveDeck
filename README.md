@@ -141,6 +141,7 @@ The selection is kept in `~/.livedeck/selection/`, outside your project. Nothing
 | `livedeck.pastePlainText` | `true` | Paste as plain text to protect the theme |
 | `livedeck.normalizeMarkup` | `true` | `<b>`→`<strong>`, `<i>`→`<em>`, strip empty spans |
 | `livedeck.imageFolder` | `images` | Where pasted/dropped/inserted images are saved, relative to the deck |
+| `livedeck.compressInlineImages` | `true` | On open, rewrite large opaque inline PNGs (`data:image/png`, over ~110 KB) as JPEG at quality 86, longest side ≤ 1600 px; PNGs with transparency are kept |
 
 Command: **LiveDeck: Set Anthropic API Key** — set or clear the key used by *AI this element*.
 

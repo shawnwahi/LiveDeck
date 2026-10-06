@@ -23,6 +23,7 @@ if (tests) {
       'tests/fileDocument.test.ts',
       'tests/selection.test.ts',
       'tests/serve.test.ts',
+      'tests/imageCompress.test.ts',
     ],
     outdir: 'out-tests',
     outExtension: { '.js': '.cjs' },

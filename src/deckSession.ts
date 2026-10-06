@@ -28,6 +28,7 @@ import {
 import Anthropic from '@anthropic-ai/sdk';
 import { runAiEdit, validateReplacement } from './aiEdit';
 import { SelectionItem, writeSelection } from './selection';
+import { DEFAULT_IMAGE_COMPRESS, planImageCompression } from './imageCompress';
 
 export interface ShellConfig {
   slideSelectors: string[];
@@ -36,8 +37,15 @@ export interface ShellConfig {
   normalizeMarkup: boolean;
 }
 
+/** Host-side settings: the shell config plus what only the extension uses. */
+export type HostConfig = ShellConfig & {
+  imageFolder: string;
+  /** On open, rewrite large opaque inline PNGs as JPEG (imageCompress.ts). */
+  compressInlineImages: boolean;
+};
+
 /** Defaults mirror the `livedeck.*` settings in package.json. */
-export const DEFAULT_CONFIG: ShellConfig & { imageFolder: string } = {
+export const DEFAULT_CONFIG: HostConfig = {
   slideSelectors: [
     'section.slide',
     '.slide',
@@ -50,6 +58,7 @@ export const DEFAULT_CONFIG: ShellConfig & { imageFolder: string } = {
   pastePlainText: true,
   normalizeMarkup: true,
   imageFolder: 'images',
+  compressInlineImages: true,
 };
 
 /** A changed span of the document, in offsets of the text before the change. */
@@ -77,7 +86,7 @@ export interface HostAdapter {
   post(msg: unknown): void;
   /** <base href> for the rendered deck: where relative URLs resolve. */
   baseHref(): string;
-  config(): ShellConfig & { imageFolder: string };
+  config(): HostConfig;
   undo(): Promise<void>;
   redo(): Promise<void>;
   save(): Promise<void>;
@@ -167,6 +176,9 @@ export class DeckSession {
   private externalReloadTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly disposables: Disposable[] = [];
   private aiAbort: AbortController | null = null;
+  private compressing: Promise<void> | null = null;
+  /** Inline images already examined, by base64 payload (null: left as is). */
+  private readonly compressedImages = new Map<string, string | null>();
 
   constructor(private readonly host: HostAdapter) {
     this.disposables.push(
@@ -262,6 +274,46 @@ export class DeckSession {
     this.postDirty();
   }
 
+  /**
+   * Before rendering, shrink large opaque inline PNGs to JPEG. One edit per
+   * data: URI, applied last-to-first and only where the source still holds
+   * the exact URI; concurrent 'ready's (several tabs) share one run.
+   */
+  private compressInlineImages(): Promise<void> {
+    if (!this.host.config().compressInlineImages) return Promise.resolve();
+    this.compressing ??= this.runImageCompression().finally(() => {
+      this.compressing = null;
+    });
+    return this.compressing;
+  }
+
+  private async runImageCompression() {
+    const source = this.host.getText();
+    const pending = [...source.matchAll(/data:image\/png;base64,([A-Za-z0-9+/]+)/g)].filter(
+      (m) => m[0].length >= DEFAULT_IMAGE_COMPRESS.minChars && !this.compressedImages.has(m[1])
+    ).length;
+    if (!pending) return;
+    this.post({ type: 'toast', text: `Compressing ${pending} inline PNG${pending > 1 ? 's' : ''}…` });
+    const plan = await planImageCompression(
+      source,
+      DEFAULT_IMAGE_COMPRESS,
+      () => new Promise((r) => setImmediate(r)),
+      this.compressedImages
+    );
+    let saved = 0;
+    for (const r of [...plan.replacements].reverse()) {
+      if (this.host.getText().slice(r.start, r.end) !== r.original) continue;
+      if (await this.applySelf(r.start, r.end, r.text)) saved += r.original.length - r.text.length;
+    }
+    if (saved > 0) {
+      const mb = (n: number) => (n / 1e6).toFixed(1);
+      this.post({
+        type: 'toast',
+        text: `Compressed ${plan.images} inline PNG${plan.images > 1 ? 's' : ''} to JPEG: ${mb(source.length)} → ${mb(source.length - saved)} MB`,
+      });
+    }
+  }
+
   private scheduleExternalReload() {
     clearTimeout(this.externalReloadTimer);
     this.externalReloadTimer = setTimeout(() => {
@@ -335,6 +387,7 @@ export class DeckSession {
   async onMessage(msg: any) {
     switch (msg?.type) {
       case 'ready':
+        await this.compressInlineImages();
         this.postInit();
         break;
       case 'edit':

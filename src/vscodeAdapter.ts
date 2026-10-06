@@ -69,6 +69,7 @@ export class VscodeAdapter implements HostAdapter {
       pastePlainText: c.get<boolean>('pastePlainText') ?? DEFAULT_CONFIG.pastePlainText,
       normalizeMarkup: c.get<boolean>('normalizeMarkup') ?? DEFAULT_CONFIG.normalizeMarkup,
       imageFolder: c.get<string>('imageFolder') ?? DEFAULT_CONFIG.imageFolder,
+      compressInlineImages: c.get<boolean>('compressInlineImages') ?? DEFAULT_CONFIG.compressInlineImages,
     };
   }
 
