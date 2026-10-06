@@ -75,3 +75,45 @@ test('a byte-order mark survives edits', () => {
   doc.replace(3, 6, 'Two');
   assert.equal(fs.readFileSync(file, 'utf8'), '﻿<p>Two</p>');
 });
+
+test('undo survives an outside edit earlier in the file', () => {
+  const file = tmpDeck('<title>T</title>\n<h1>A</h1>\n<p>One</p>\n<p>Two</p>\n');
+  const doc = new FileDocument(file);
+  const text = () => fs.readFileSync(file, 'utf8');
+  // two of our own edits: delete <p>One</p>, then retitle the h1
+  const p1 = text().indexOf('<p>One</p>\n');
+  assert.ok(doc.replace(p1, p1 + '<p>One</p>\n'.length, ''));
+  const h = text().indexOf('A</h1>');
+  assert.ok(doc.replace(h, h + 1, 'Alpha'));
+  // an agent changes the <title>, before both edits
+  fs.writeFileSync(file, text().replace('<title>T</title>', '<title>Longer title</title>'));
+  doc.checkDisk();
+  assert.equal(doc.undo(), 'ok');
+  assert.equal(doc.undo(), 'ok');
+  assert.equal(text(), '<title>Longer title</title>\n<h1>A</h1>\n<p>One</p>\n<p>Two</p>\n');
+});
+
+test('undo keeps going past an outside edit after our edits', () => {
+  const file = tmpDeck('<h1>A</h1>\n<p>One</p>\n');
+  const doc = new FileDocument(file);
+  const text = () => fs.readFileSync(file, 'utf8');
+  assert.ok(doc.replace(4, 5, 'B'));
+  fs.writeFileSync(file, text() + '<p>Agent</p>\n');
+  doc.checkDisk();
+  assert.equal(doc.undo(), 'ok');
+  assert.equal(text(), '<h1>A</h1>\n<p>One</p>\n<p>Agent</p>\n');
+});
+
+test('undo stops at an edit an outside change overlapped', () => {
+  const file = tmpDeck('<h1>A</h1>\n<p>One</p>\n');
+  const doc = new FileDocument(file);
+  const text = () => fs.readFileSync(file, 'utf8');
+  assert.ok(doc.replace(4, 5, 'B')); // h1: A → B
+  assert.ok(doc.replace(14, 17, 'Uno')); // p: One → Uno
+  fs.writeFileSync(file, text().replace('B</h1>', 'C</h1>')); // agent rewrites the h1
+  doc.checkDisk();
+  assert.equal(doc.undo(), 'ok'); // Uno → One still undoes
+  assert.equal(doc.undo(), 'conflict'); // the h1 edit is gone, not reverted over the agent's
+  assert.equal(doc.undo(), 'empty');
+  assert.equal(text(), '<h1>C</h1>\n<p>One</p>\n');
+});

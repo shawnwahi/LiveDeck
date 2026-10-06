@@ -36,6 +36,8 @@ export class FileDocument {
   private bom: boolean;
   private readonly undoStack: UndoEntry[] = [];
   private redoStack: UndoEntry[] = [];
+  /** An outside change cut the undo history; tell the user when they reach it. */
+  private historyCut = false;
   private readonly listeners = new Set<(changes: TextChange[]) => void>();
   private watcher: fs.FSWatcher | null = null;
   private checkTimer: ReturnType<typeof setTimeout> | undefined;
@@ -85,7 +87,11 @@ export class FileDocument {
    */
   undo(): 'ok' | 'empty' | 'conflict' {
     const e = this.undoStack.pop();
-    if (!e) return 'empty';
+    if (!e) {
+      if (!this.historyCut) return 'empty';
+      this.historyCut = false;
+      return 'conflict';
+    }
     if (this.text.slice(e.start, e.start + e.newText.length) !== e.newText) {
       this.undoStack.length = 0;
       return 'conflict';
@@ -120,7 +126,37 @@ export class FileDocument {
     const d = diffRange(this.text, next);
     if (!d) return; // our own write, or no-op
     this.text = next;
+    this.rebaseHistory(d);
     this.emit([{ start: d.start, end: d.endA }]);
+  }
+
+  /**
+   * Keep our undo steps usable across someone else's change: shift each step
+   * the change sits before, walking down the stack (each step's offsets are
+   * in the text as it was right after that step). The first step the change
+   * overlaps, and everything older, is dropped rather than reverted over it.
+   * Redo is cleared, as after any new edit.
+   */
+  private rebaseHistory(d: { start: number; endA: number; endB: number }) {
+    const delta = d.endB - d.endA;
+    let start = d.start;
+    let end = d.endA;
+    for (let i = this.undoStack.length - 1; i >= 0; i--) {
+      const e = this.undoStack[i];
+      if (end <= e.start) {
+        e.start += delta;
+      } else if (start >= e.start + e.newText.length) {
+        // map the change back to before this step
+        const shift = e.oldText.length - e.newText.length;
+        start += shift;
+        end += shift;
+      } else {
+        this.undoStack.splice(0, i + 1);
+        this.historyCut = true;
+        break;
+      }
+    }
+    this.redoStack = [];
   }
 
   /** Watch the directory, not the file: atomic writers replace the inode. */
