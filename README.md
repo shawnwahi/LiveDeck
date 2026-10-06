@@ -8,7 +8,7 @@ Asking an LLM to "fix the wording on slide 4" sometimes rewrites half the file. 
 
 - **True WYSIWYG** — the deck renders in its own iframe with its real CSS, images, SVGs, fonts, and scripts (charts drawn at load time work). What you see is what the browser shows.
 - **Click-to-edit** — hover highlights editable text blocks (headings, paragraphs, bullets, table cells); click to place the caret and type. Escape or click elsewhere to finish.
-- **Formatting** — bold / italic / underline / strikethrough (⌘B/⌘I/⌘U), inline `code`, links (⌘K), clear formatting, left/center/right alignment.
+- **Formatting** — bold / italic / underline / strikethrough (⌘B/⌘I/⌘U), inline `code`, links (⌘K), clear formatting, left/center/right alignment. Font size A−/A+ (⇧⌘, / ⇧⌘.) resizes the text box you're editing or every selected element by about 10%, written as an inline `font-size` in px.
 - **Bullets like PowerPoint** — Enter adds a bullet, Enter on an empty bullet exits the list, Tab/Shift+Tab indent/outdent, Alt+↑/↓ reorder, and the toolbar converts paragraphs ⇄ bulleted/numbered lists.
 - **Delete whole elements** — Escape while editing selects the element (PowerPoint-style), or ⌥+click selects anything directly, including images and SVG figures; Backspace/Delete removes it from the file (whole line, no blank residue), ⌘Z brings it back.
 - **Right-click menu** — right-click any element for *AI this element…*, Duplicate, Delete, Move up/down, Reset position/size, Select parent, Insert image, and Reveal in source.
@@ -58,6 +58,7 @@ Try it on `examples/demo.html`.
 | --- | --- |
 | ⌘B / ⌘I / ⌘U | Bold / italic / underline |
 | ⌘K | Add or edit a link |
+| ⇧⌘, / ⇧⌘. | Decrease / increase font size (text box or selection) |
 | Enter | New bullet (in lists) / split paragraph |
 | Enter on empty bullet | Exit the list into a paragraph |
 | Shift+Enter | Line break |
@@ -84,6 +85,53 @@ Try it on `examples/demo.html`.
 | PgUp / PgDn | Previous / next slide (when not editing) |
 | ⌘+click a link | Open it in your browser |
 
+## Use it with Claude desktop, Codex, or any browser
+
+LiveDeck also runs outside VS Code, as a small local server that serves the same editor to a browser tab. Run it next to a coding agent: you click and type in the deck, the agent edits the same file, and each of you sees the other's changes live.
+
+Install the `livedeck` command (Node 18+):
+
+```bash
+npm install -g github:shawnwahi/LiveDeck
+```
+
+```bash
+livedeck serve slides.html --open   # editor at http://localhost:4321/
+```
+
+Every edit is written to the file at once (there is no Save step, so the agent always reads what you see). Undo/redo cover your own edits. Edits the agent, git or another editor make to the file show up in the editor as they land. *AI this element* works when `ANTHROPIC_API_KEY` is set in the environment. Per-deck settings go in `.livedeck.json` next to the deck, using the setting names below without the `livedeck.` prefix.
+
+**Claude desktop app (Code tab).** Run `livedeck init-claude slides.html` in the project folder. That adds a "LiveDeck" entry to `.claude/launch.json`. Then start **LiveDeck** from the Preview menu, and the editor opens in the Preview pane beside the chat.
+
+**Codex app.** Run `livedeck serve slides.html` in the integrated terminal and open `http://localhost:4321/` in the in-app browser (⌘⇧B).
+
+### Let the agent see what you selected
+
+`livedeck mcp` is an MCP server with one tool, `get_selection`. It tells the agent which elements you have selected (or which text you are typing in), in VS Code/Cursor or in a browser tab. You can then say "tighten this" or "merge these two bullets" and the agent edits exactly those elements. It reports each element's file, exact source, line range and slide, re-checked against the file as it is now.
+
+- **Claude Code / Claude desktop:** install the plugin, which bundles the MCP server, a `/livedeck <deck.html>` command and a skill telling Claude when to call `get_selection`:
+  ```
+  /plugin marketplace add shawnwahi/LiveDeck
+  /plugin install livedeck@livedeck
+  ```
+  Or register only the server: `claude mcp add livedeck -- livedeck mcp`.
+- **Codex:** `codex mcp add livedeck -- livedeck mcp`, or in `~/.codex/config.toml`:
+  ```toml
+  [mcp_servers.livedeck]
+  command = "livedeck"
+  args = ["mcp"]
+  ```
+  Codex has no plugin skill, so tell it when to use the tool. Add this to your deck project's `AGENTS.md`:
+  ```markdown
+  ## Slide decks open in LiveDeck
+  When I say "this", "these", "here" or "the selected …" about an HTML deck, call the
+  livedeck `get_selection` tool first. Edit only the returned element's source range,
+  matching existing markup. If an item is `stale`, ask me to reselect it. Never add
+  `data-ld-*` attributes.
+  ```
+
+The selection is kept in `~/.livedeck/selection/`, outside your project. Nothing is added to your repo.
+
 ## Settings
 
 | Setting | Default | Meaning |
@@ -93,6 +141,7 @@ Try it on `examples/demo.html`.
 | `livedeck.pastePlainText` | `true` | Paste as plain text to protect the theme |
 | `livedeck.normalizeMarkup` | `true` | `<b>`→`<strong>`, `<i>`→`<em>`, strip empty spans |
 | `livedeck.imageFolder` | `images` | Where pasted/dropped/inserted images are saved, relative to the deck |
+| `livedeck.compressInlineImages` | `true` | On open, rewrite large opaque inline PNGs (`data:image/png`, over ~110 KB) as JPEG at quality 86, longest side ≤ 1600 px; PNGs with transparency are kept |
 
 Command: **LiveDeck: Set Anthropic API Key** — set or clear the key used by *AI this element*.
 
@@ -107,4 +156,5 @@ LiveDeck parses the file with `parse5` — the same HTML parsing algorithm brows
 - Decks whose scripts *restructure* the DOM at load (e.g. frameworks that re-wrap slides) render fine, but blocks the framework created or moved may not be editable; static decks — the common case for LLM-generated decks — are fully editable.
 - Undo/redo applies to the file and patches the deck in place; the caret position is not restored.
 - External changes that cross element boundaries trigger a full deck reload; slide-mode decks (one slide shown at a time via their own script) reset to slide 1 on such reloads, since the current slide lives in the deck's own JS state.
-- One LiveDeck view per document at a time.
+- One LiveDeck view per document at a time in VS Code. `livedeck serve` allows several tabs on the same deck.
+- In `livedeck serve`, Source/Save aren't shown and *Reveal in source* shows the line number instead of opening an editor.

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "livedeck": {
+      "command": "livedeck",
+      "args": ["mcp"]
+    }
+  }
+}

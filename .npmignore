@@ -1,0 +1,19 @@
+# npm package (`npm install -g github:shawnwahi/LiveDeck`): the built CLI and
+# its media only. The .vsix is packaged separately (see .vscodeignore).
+src/
+tests/
+out-tests/
+examples/
+docs/
+claude-plugin/
+.claude-plugin/
+.gstack/
+.vscode/
+*.map
+*.vsix
+*.tgz
+esbuild.mjs
+tsconfig.json
+CLAUDE.md
+AGENTS.md
+.DS_Store

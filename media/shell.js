@@ -21,6 +21,7 @@
     dirty: new Set(), // roots with unflushed DOM changes
     opQueue: [],
     pending: null, // op awaiting ack
+    staleIds: new Set(), // ids retired by an ack whose DOM could not be re-stamped
     debounceTimer: null,
     slides: [],
     slideIdx: 0,
@@ -191,6 +192,7 @@
       if (html === root.__ldLastSent) { state.dirty.delete(root); pump(); return; }
       root.__ldLastSent = html;
       op.regionEls = [root];
+      op.sentIds = [root, ...root.querySelectorAll('*')].map((e) => e.getAttribute('data-ld-id'));
       op.payload = {
         type: 'edit', mode: 'inner',
         id: root.getAttribute('data-ld-id'),
@@ -207,12 +209,17 @@
         return;
       }
       op.payload = Object.assign({ type: 'struct', mapVersion: state.mapVersion }, p);
-    } else { // outer: replace one old element with op.els
+    } else { // outer: replace one old element with op.els (none: delete op.removed)
       if (!op.els.every((e) => e.isConnected)) { requestReload('detached region'); return; }
+      // A delete reads its id now: an edit acked since it was queued may have re-stamped it.
+      const id = op.removed ? op.removed.getAttribute('data-ld-id') : op.oldId;
+      // Retired id: the element sat inside a root that is being re-flushed
+      // from the DOM, and that flush already leaves it out.
+      if (op.removed && state.staleIds.has(id)) { pump(); return; }
       op.regionEls = op.els;
       op.payload = {
         type: 'edit', mode: 'outer',
-        id: op.oldId,
+        id,
         parts: op.els.map((e) => serializeClean(e, false)),
         mapVersion: state.mapVersion,
       };
@@ -226,22 +233,28 @@
     const op = state.pending;
     state.pending = null;
     state.mapVersion = msg.mapVersion;
+    publishSelection(); // ids and source moved; runs after this ack settles
     if (op) {
+      // Detached roots count too: an element deleted while its edit was in
+      // flight keeps its subtree, and the queued delete needs its fresh id.
       const els = [];
       for (const rootEl of op.regionEls) {
-        if (rootEl.isConnected) {
-          els.push(rootEl, ...rootEl.querySelectorAll('*'));
-        }
+        els.push(rootEl, ...rootEl.querySelectorAll('*'));
       }
       if (els.length === msg.ids.length) {
         els.forEach((el, i) => el.setAttribute('data-ld-id', msg.ids[i]));
-      } else if (op.regionEls.length === 1 && op.regionEls[0].isConnected && msg.ids.length >= 1) {
-        // Structure moved under us mid-flight (fast typing). Stamp the root —
-        // it is always first in DFS order — and re-flush to converge.
+      } else if (op.regionEls.length === 1 && msg.ids.length >= 1) {
+        // Structure moved under us mid-flight (fast typing, or a child was
+        // deleted). Stamp the root — it is always first in DFS order — and,
+        // if it is still in the deck, re-flush to converge. Its old
+        // descendant ids are gone host-side.
         const root = op.regionEls[0];
         root.setAttribute('data-ld-id', msg.ids[0]);
-        root.__ldLastSent = undefined;
-        state.dirty.add(root);
+        (op.sentIds || []).slice(1).forEach((id) => { if (id) state.staleIds.add(id); });
+        if (root.isConnected) {
+          root.__ldLastSent = undefined;
+          state.dirty.add(root);
+        }
       } else {
         requestReload('region mismatch after ack');
         return;
@@ -255,6 +268,7 @@
     const op = state.pending;
     state.pending = null;
     state.mapVersion = msg.mapVersion;
+    publishSelection(); // ids and source moved; runs after this ack settles
     if (op && op.kind === 'struct' && op.onAck && !msg.noop) {
       try {
         if (op.onAck(msg) === false) { requestReload('struct ack mismatch'); return; }
@@ -478,7 +492,7 @@
     for (const el of els) {
       const oldId = el.getAttribute('data-ld-id');
       el.remove();
-      enqueue({ kind: 'outer', oldId, els: [] });
+      enqueue({ kind: 'outer', oldId, removed: el, els: [] });
     }
     toast((els.length > 1 ? `Deleted ${els.length} elements` : 'Deleted <' + els[0].tagName.toLowerCase() + '>') + ' — ⌘Z to undo');
   }
@@ -979,7 +993,32 @@
     return stamped(el) || (el && el.isConnected && el === state.selected) ? el : null;
   }
 
+  /** Tell the host what is selected (or being edited), so coding agents can
+   *  ask LiveDeck what "this" refers to. Debounced; only sends changes. */
+  let selTimer = 0;
+  let selKey = '';
+  function publishSelection() {
+    clearTimeout(selTimer);
+    selTimer = setTimeout(() => {
+      const els = selectedEls();
+      const editing = !els.length && state.editing && state.editing.root.isConnected ? state.editing.root : null;
+      const items = (editing ? [editing] : els)
+        .filter((el) => el.getAttribute('data-ld-id'))
+        .map((el) => ({
+          id: el.getAttribute('data-ld-id'),
+          slide: state.slides.findIndex((s) => s === el || s.contains(el)) + 1,
+          editing: el === editing,
+        }));
+      const key = state.mapVersion + JSON.stringify(items);
+      if (key === selKey) return;
+      selKey = key;
+      post({ type: 'selection', mapVersion: state.mapVersion, items });
+    }, 150);
+  }
+
   function refreshOverlay() {
+    publishSelection();
+    updateFontButtons();
     const box = $('#sel-box');
     if (!box) return;
     const el = state.doc && overlayTarget();
@@ -1386,6 +1425,44 @@
     enqueue({ kind: 'outer', oldId, els: [root] });
   }
 
+  /**
+   * A−/A+: scale the font size of the text box being edited, or of every
+   * selected element, by ~10% (at least 1px). Written as an inline px
+   * `font-size` through the same start-tag-only style op as resizing.
+   */
+  function stepFontSize(dir) {
+    const els = state.editing ? [state.editing.root] : selectedEls();
+    if (!els.length) return;
+    flushDirty();
+    let unchanged = 0;
+    for (const el of els) {
+      if (!stamped(el)) continue;
+      const win = el.ownerDocument.defaultView;
+      const cur = parseFloat(win.getComputedStyle(el).fontSize);
+      if (!cur) continue;
+      const probe = firstTextElement(el);
+      const before = probe && win.getComputedStyle(probe).fontSize;
+      let next = Math.round(cur * (dir > 0 ? 1.1 : 1 / 1.1));
+      if (next === Math.round(cur)) next += dir;
+      next = Math.max(6, next);
+      el.style.setProperty('font-size', next + 'px');
+      if (probe && win.getComputedStyle(probe).fontSize === before) unchanged++;
+      commitStyle(el, { 'font-size': next + 'px' });
+    }
+    if (unchanged) toast('The text inside sets its own size — select the text itself');
+    refreshOverlay();
+  }
+
+  /** The element holding the first non-blank text node under `root`. */
+  function firstTextElement(root) {
+    const doc = root.ownerDocument;
+    const w = doc.createTreeWalker(root, 4 /* SHOW_TEXT */);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (n.data.trim()) return n.parentElement;
+    }
+    return null;
+  }
+
   function toggleInlineCode() {
     const doc = state.doc;
     const sel = doc.getSelection();
@@ -1756,6 +1833,10 @@
     if (mod && e.key.toLowerCase() === 's') {
       e.preventDefault(); flushDirty(); post({ type: 'save' }); return;
     }
+    // ⇧⌘. / ⇧⌘, — font size (e.code: shift turns the keys into > and <)
+    if (mod && e.shiftKey && (e.code === 'Period' || e.code === 'Comma')) {
+      e.preventDefault(); stepFontSize(e.code === 'Period' ? 1 : -1); return;
+    }
     // Clipboard. The editor host runs ⌘C/⌘X/⌘V against LiveDeck's outer
     // document, never this nested deck document, so we do it ourselves.
     if (mod && !e.altKey && ['c', 'x', 'v'].includes(e.key.toLowerCase())) {
@@ -2034,6 +2115,7 @@
   // ---------------------------------------------------------------- toolbar
 
   function updateCrumb(root) {
+    publishSelection();
     const crumb = $('#crumb');
     if (!root) { crumb.textContent = ''; return; }
     let slidePart = '';
@@ -2051,11 +2133,20 @@
     crumb.textContent = slidePart + path.join(' › ');
   }
 
+  /** A−/A+ work on the box being edited or on any selection. */
+  function updateFontButtons() {
+    const on = !!state.editing || selectedEls().length > 0;
+    document.querySelectorAll('[data-needs-target] button').forEach((b) => {
+      b.disabled = !on;
+    });
+  }
+
   function updateToolbar() {
     const editing = !!state.editing;
     document.querySelectorAll('[data-needs-edit] button').forEach((b) => {
       b.disabled = !editing;
     });
+    updateFontButtons();
     if (!editing) return;
     const doc = state.doc;
     const q = (cmd) => { try { return doc.queryCommandState(cmd); } catch (e) { return false; } };
@@ -2093,6 +2184,8 @@
     if (!doc) return;
     if (cmd === 'undo') { flushDirty(); post({ type: 'undo' }); return; }
     if (cmd === 'redo') { flushDirty(); post({ type: 'redo' }); return; }
+    if (cmd === 'fontup') { stepFontSize(1); return; }
+    if (cmd === 'fontdown') { stepFontSize(-1); return; }
     if (!state.editing) return;
     const root = state.editing.root;
     restoreSelection();

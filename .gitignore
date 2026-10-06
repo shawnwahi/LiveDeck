@@ -3,3 +3,4 @@ dist/
 out-tests/
 *.vsix
 .DS_Store
+.gstack/

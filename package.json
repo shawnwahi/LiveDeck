@@ -2,7 +2,7 @@
   "name": "livedeck",
   "displayName": "LiveDeck — Inline HTML Deck Editor",
   "description": "Edit HTML slide decks in place, PowerPoint-style. Click into any text, type, format, add bullets — every change is written back to the HTML file as a minimal, surgical edit.",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "publisher": "celltype",
   "license": "MIT",
   "repository": {
@@ -24,6 +24,9 @@
     "editor"
   ],
   "main": "./dist/extension.js",
+  "bin": {
+    "livedeck": "dist/livedeck.js"
+  },
   "activationEvents": [],
   "contributes": {
     "customEditors": [
@@ -40,7 +43,7 @@
     "commands": [
       {
         "command": "livedeck.open",
-        "title": "Open with LiveDeck v0.3.3",
+        "title": "Open with LiveDeck v0.4.0",
         "category": "LiveDeck",
         "icon": "$(preview)"
       },
@@ -112,6 +115,11 @@
           "type": "string",
           "default": "images",
           "description": "Folder (relative to the deck) where pasted, dropped and inserted images are saved."
+        },
+        "livedeck.compressInlineImages": {
+          "type": "boolean",
+          "default": true,
+          "description": "When a deck opens, rewrite large opaque inline PNG data: URIs (over ~110 KB) as JPEG (quality 86, longest side at most 1600 px). PNGs with transparency are left alone."
         }
       }
     }
@@ -120,10 +128,13 @@
     "build": "node esbuild.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node esbuild.mjs --tests && node --test \"out-tests/*.test.cjs\"",
-    "package": "npm run build && vsce package"
+    "package": "npm run build && vsce package",
+    "serve": "npm run build && node dist/livedeck.js serve",
+    "prepare": "node esbuild.mjs"
   },
   "devDependencies": {
     "@types/node": "^18.19.0",
+    "@types/pngjs": "^6.0.5",
     "@types/vscode": "1.85.0",
     "@vscode/vsce": "^2.32.0",
     "esbuild": "^0.21.5",
@@ -131,6 +142,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
-    "parse5": "^7.1.2"
+    "jpeg-js": "^0.4.4",
+    "parse5": "^7.1.2",
+    "pngjs": "^7.0.0"
   }
 }
