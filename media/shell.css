@@ -80,6 +80,8 @@ body {
 .glyph.gs { text-decoration: line-through; }
 .glyph.gm { font-family: var(--vscode-editor-font-family, monospace); font-size: 10.5px; }
 .glyph sub { font-size: 8px; }
+.glyph.gfd { font-size: 10px; }
+.glyph.gfu { font-size: 15px; }
 
 #slide-ind, #zoom-ind {
   min-width: 44px;

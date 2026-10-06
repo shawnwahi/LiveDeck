@@ -8,7 +8,7 @@ Asking an LLM to "fix the wording on slide 4" sometimes rewrites half the file. 
 
 - **True WYSIWYG** — the deck renders in its own iframe with its real CSS, images, SVGs, fonts, and scripts (charts drawn at load time work). What you see is what the browser shows.
 - **Click-to-edit** — hover highlights editable text blocks (headings, paragraphs, bullets, table cells); click to place the caret and type. Escape or click elsewhere to finish.
-- **Formatting** — bold / italic / underline / strikethrough (⌘B/⌘I/⌘U), inline `code`, links (⌘K), clear formatting, left/center/right alignment.
+- **Formatting** — bold / italic / underline / strikethrough (⌘B/⌘I/⌘U), inline `code`, links (⌘K), clear formatting, left/center/right alignment. Font size A−/A+ (⇧⌘, / ⇧⌘.) resizes the text box you're editing or every selected element by about 10%, written as an inline `font-size` in px.
 - **Bullets like PowerPoint** — Enter adds a bullet, Enter on an empty bullet exits the list, Tab/Shift+Tab indent/outdent, Alt+↑/↓ reorder, and the toolbar converts paragraphs ⇄ bulleted/numbered lists.
 - **Delete whole elements** — Escape while editing selects the element (PowerPoint-style), or ⌥+click selects anything directly, including images and SVG figures; Backspace/Delete removes it from the file (whole line, no blank residue), ⌘Z brings it back.
 - **Right-click menu** — right-click any element for *AI this element…*, Duplicate, Delete, Move up/down, Reset position/size, Select parent, Insert image, and Reveal in source.
@@ -58,6 +58,7 @@ Try it on `examples/demo.html`.
 | --- | --- |
 | ⌘B / ⌘I / ⌘U | Bold / italic / underline |
 | ⌘K | Add or edit a link |
+| ⇧⌘, / ⇧⌘. | Decrease / increase font size (text box or selection) |
 | Enter | New bullet (in lists) / split paragraph |
 | Enter on empty bullet | Exit the list into a paragraph |
 | Shift+Enter | Line break |

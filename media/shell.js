@@ -1006,6 +1006,7 @@
 
   function refreshOverlay() {
     publishSelection();
+    updateFontButtons();
     const box = $('#sel-box');
     if (!box) return;
     const el = state.doc && overlayTarget();
@@ -1412,6 +1413,44 @@
     enqueue({ kind: 'outer', oldId, els: [root] });
   }
 
+  /**
+   * A−/A+: scale the font size of the text box being edited, or of every
+   * selected element, by ~10% (at least 1px). Written as an inline px
+   * `font-size` through the same start-tag-only style op as resizing.
+   */
+  function stepFontSize(dir) {
+    const els = state.editing ? [state.editing.root] : selectedEls();
+    if (!els.length) return;
+    flushDirty();
+    let unchanged = 0;
+    for (const el of els) {
+      if (!stamped(el)) continue;
+      const win = el.ownerDocument.defaultView;
+      const cur = parseFloat(win.getComputedStyle(el).fontSize);
+      if (!cur) continue;
+      const probe = firstTextElement(el);
+      const before = probe && win.getComputedStyle(probe).fontSize;
+      let next = Math.round(cur * (dir > 0 ? 1.1 : 1 / 1.1));
+      if (next === Math.round(cur)) next += dir;
+      next = Math.max(6, next);
+      el.style.setProperty('font-size', next + 'px');
+      if (probe && win.getComputedStyle(probe).fontSize === before) unchanged++;
+      commitStyle(el, { 'font-size': next + 'px' });
+    }
+    if (unchanged) toast('The text inside sets its own size — select the text itself');
+    refreshOverlay();
+  }
+
+  /** The element holding the first non-blank text node under `root`. */
+  function firstTextElement(root) {
+    const doc = root.ownerDocument;
+    const w = doc.createTreeWalker(root, 4 /* SHOW_TEXT */);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (n.data.trim()) return n.parentElement;
+    }
+    return null;
+  }
+
   function toggleInlineCode() {
     const doc = state.doc;
     const sel = doc.getSelection();
@@ -1782,6 +1821,10 @@
     if (mod && e.key.toLowerCase() === 's') {
       e.preventDefault(); flushDirty(); post({ type: 'save' }); return;
     }
+    // ⇧⌘. / ⇧⌘, — font size (e.code: shift turns the keys into > and <)
+    if (mod && e.shiftKey && (e.code === 'Period' || e.code === 'Comma')) {
+      e.preventDefault(); stepFontSize(e.code === 'Period' ? 1 : -1); return;
+    }
     // Clipboard. The editor host runs ⌘C/⌘X/⌘V against LiveDeck's outer
     // document, never this nested deck document, so we do it ourselves.
     if (mod && !e.altKey && ['c', 'x', 'v'].includes(e.key.toLowerCase())) {
@@ -2078,11 +2121,20 @@
     crumb.textContent = slidePart + path.join(' › ');
   }
 
+  /** A−/A+ work on the box being edited or on any selection. */
+  function updateFontButtons() {
+    const on = !!state.editing || selectedEls().length > 0;
+    document.querySelectorAll('[data-needs-target] button').forEach((b) => {
+      b.disabled = !on;
+    });
+  }
+
   function updateToolbar() {
     const editing = !!state.editing;
     document.querySelectorAll('[data-needs-edit] button').forEach((b) => {
       b.disabled = !editing;
     });
+    updateFontButtons();
     if (!editing) return;
     const doc = state.doc;
     const q = (cmd) => { try { return doc.queryCommandState(cmd); } catch (e) { return false; } };
@@ -2120,6 +2172,8 @@
     if (!doc) return;
     if (cmd === 'undo') { flushDirty(); post({ type: 'undo' }); return; }
     if (cmd === 'redo') { flushDirty(); post({ type: 'redo' }); return; }
+    if (cmd === 'fontup') { stepFontSize(1); return; }
+    if (cmd === 'fontdown') { stepFontSize(-1); return; }
     if (!state.editing) return;
     const root = state.editing.root;
     restoreSelection();

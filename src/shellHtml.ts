@@ -80,6 +80,11 @@ export function shellHtml(opts: ShellHtmlOptions): string {
     <button data-cmd="alignright" title="Align right">${icon.alignright}</button>
   </div>
   <div class="tb-sep"></div>
+  <div class="tb-group" data-needs-target>
+    <button data-cmd="fontdown" title="Decrease font size (⇧⌘,)"><span class="glyph gfd">A</span></button>
+    <button data-cmd="fontup" title="Increase font size (⇧⌘.)"><span class="glyph gfu">A</span></button>
+  </div>
+  <div class="tb-sep"></div>
   <div class="tb-group">
     <button data-cmd="undo" title="Undo (⌘Z)">${icon.undo}</button>
     <button data-cmd="redo" title="Redo (⇧⌘Z)">${icon.redo}</button>
