@@ -114,6 +114,21 @@
     else waiting.push(body);
   }
 
+  // Undo/redo with focus outside the deck (after clicking a toolbar button or
+  // the margin). VS Code handles these keys itself; a browser tab doesn't.
+  // Go through the toolbar buttons so pending typing is flushed first. Keys
+  // pressed inside the deck iframe never reach this document.
+  document.addEventListener('keydown', (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    if (e.target && e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return;
+    const k = e.key.toLowerCase();
+    const cmd = k === 'z' ? (e.shiftKey ? 'redo' : 'undo') : k === 'y' && e.ctrlKey ? 'redo' : null;
+    const btn = cmd && document.querySelector('[data-cmd="' + cmd + '"]');
+    if (!btn) return;
+    e.preventDefault();
+    btn.click();
+  });
+
   window.acquireVsCodeApi = () => ({
     postMessage: post,
     getState() {
